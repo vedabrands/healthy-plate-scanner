@@ -14,7 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      scans: {
+        Row: {
+          barcode: string | null
+          brand: string | null
+          created_at: string
+          food_name: string
+          grade: string
+          id: string
+          result: Json
+          score: number | null
+          summary: string | null
+          user_id: string
+        }
+        Insert: {
+          barcode?: string | null
+          brand?: string | null
+          created_at?: string
+          food_name: string
+          grade: string
+          id?: string
+          result?: Json
+          score?: number | null
+          summary?: string | null
+          user_id: string
+        }
+        Update: {
+          barcode?: string | null
+          brand?: string | null
+          created_at?: string
+          food_name?: string
+          grade?: string
+          id?: string
+          result?: Json
+          score?: number | null
+          summary?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
