@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { FoodScanner } from "@/components/FoodScanner";
+import { GradeBadge } from "@/components/GradeBadge";
 import { SiteHeader } from "@/components/SiteHeader";
 
 export const Route = createFileRoute("/")({
@@ -40,20 +41,8 @@ function Index() {
             eat instead.
           </p>
           <div className="mt-6 flex flex-wrap justify-center gap-2 text-sm">
-            {[
-              ["A", "grade-a"],
-              ["B", "grade-b"],
-              ["C", "grade-c"],
-              ["D", "grade-d"],
-              ["E", "grade-e"],
-              ["F", "grade-f"],
-            ].map(([g, c]) => (
-              <span
-                key={g}
-                className={`grid size-9 place-items-center rounded-xl bg-${c} font-display font-semibold text-primary-foreground`}
-              >
-                {g}
-              </span>
+            {["A", "B", "C", "D", "E", "F"].map((g) => (
+              <GradeBadge key={g} grade={g} size="sm" className="rounded-xl" />
             ))}
           </div>
         </section>
