@@ -63,10 +63,13 @@ export function FoodScanner() {
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Analysis | null>(null);
-  const [cameraOn, setCameraOn] = useState(false);
-
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  
+  // Live Camera States
+  const [liveCameraActive, setLiveCameraActive] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  
+  const photoVideoRef = useRef<HTMLVideoElement | null>(null);
+  const barcodeVideoRef = useRef<HTMLVideoElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const scannerControlsRef = useRef<{ stop: () => void } | null>(null);
   const scanLockedRef = useRef(false);
@@ -74,14 +77,18 @@ export function FoodScanner() {
   const analyze = useServerFn(analyzeFood);
   const { user } = useAuth();
 
-  const stopCamera = () => {
+  const stopAllCameras = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((t) => t.stop());
+      setCameraStream(null);
+    }
     scannerControlsRef.current?.stop();
     scannerControlsRef.current = null;
     scanLockedRef.current = false;
-    setCameraOn(false);
+    setLiveCameraActive(false);
   };
 
-  useEffect(() => () => stopCamera(), []);
+  useEffect(() => () => stopAllCameras(), []);
 
   const run = async (payload: { name?: string; barcode?: string; imageBase64?: string }) => {
     setLoading(true);
@@ -109,7 +116,7 @@ export function FoodScanner() {
     }
   };
 
-  const handleFileSelection = async (file?: File) => {
+  const handleGallerySelection = async (file?: File) => {
     if (!file) return;
     try {
       const compressed = await compressImageFile(file);
@@ -120,13 +127,67 @@ export function FoodScanner() {
     }
   };
 
-  const startCamera = async () => {
+  // Live Camera for Photo Mode
+  const startPhotoCamera = async () => {
+    stopAllCameras();
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera unavailable");
-      setCameraOn(true);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      setCameraStream(stream);
+      setLiveCameraActive(true);
+      if (photoVideoRef.current) {
+        photoVideoRef.current.srcObject = stream;
+        await photoVideoRef.current.play();
+      }
+    } catch {
+      stopAllCameras();
+      toast.error("Couldn't open camera. Please grant camera permissions.");
+    }
+  };
+
+  const snapPhotoFromStream = () => {
+    const video = photoVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement("canvas");
+    const MAX_DIM = 1024;
+    let width = video.videoWidth || 640;
+    let height = video.videoHeight || 480;
+
+    if (width > height) {
+      if (width > MAX_DIM) {
+        height = Math.round((height * MAX_DIM) / width);
+        width = MAX_DIM;
+      }
+    } else {
+      if (height > MAX_DIM) {
+        width = Math.round((width * MAX_HEIGHT) / height);
+        height = MAX_DIM;
+      }
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx?.drawImage(video, 0, 0, width, height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+
+    stopAllCameras();
+    setPreview(dataUrl);
+    void run({ imageBase64: dataUrl, name: text.trim() || undefined });
+  };
+
+  // Barcode Scanner Camera
+  const startBarcodeCamera = async () => {
+    stopAllCameras();
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera unavailable");
+      setLiveCameraActive(true);
       scanLockedRef.current = false;
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const video = videoRef.current;
+      const video = barcodeVideoRef.current;
       if (!video) throw new Error("Camera preview unavailable");
       const [{ BrowserMultiFormatReader }, { BarcodeFormat, DecodeHintType }] = await Promise.all([
         import("@zxing/browser"),
@@ -156,7 +217,7 @@ export function FoodScanner() {
           scanLockedRef.current = true;
           controls.stop();
           scannerControlsRef.current = null;
-          setCameraOn(false);
+          setLiveCameraActive(false);
           setBarcode(code);
           toast.success(`Barcode ${code} detected`);
           void run({ barcode: code });
@@ -164,38 +225,9 @@ export function FoodScanner() {
       );
       scannerControlsRef.current = controls;
     } catch {
-      stopCamera();
-      toast.error("Couldn't open the camera. Try a photo or type the barcode instead.");
+      stopAllCameras();
+      toast.error("Couldn't open the barcode camera.");
     }
-  };
-
-  const captureFrame = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    const canvas = document.createElement("canvas");
-    const MAX_DIM = 1024;
-    let width = video.videoWidth;
-    let height = video.videoHeight;
-
-    if (width > height) {
-      if (width > MAX_DIM) {
-        height = Math.round((height * MAX_DIM) / width);
-        width = MAX_DIM;
-      }
-    } else {
-      if (height > MAX_DIM) {
-        width = Math.round((width * MAX_HEIGHT) / height);
-        height = MAX_DIM;
-      }
-    }
-
-    canvas.width = width;
-    canvas.height = height;
-    canvas.getContext("2d")?.drawImage(video, 0, 0, width, height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
-    stopCamera();
-    setPreview(dataUrl);
-    void run({ imageBase64: dataUrl });
   };
 
   return (
@@ -208,7 +240,7 @@ export function FoodScanner() {
               type="button"
               variant={mode === m.id ? "default" : "secondary"}
               onClick={() => {
-                stopCamera();
+                stopAllCameras();
                 setMode(m.id);
               }}
               className={cn("rounded-full border", mode === m.id && "border-primary")}
@@ -222,59 +254,67 @@ export function FoodScanner() {
         <div className="mt-5">
           {mode === "photo" && (
             <div className="space-y-4">
-              <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-secondary/50 p-8 text-center">
-                <ImageUp className="size-8 text-primary" />
-                <div>
-                  <p className="font-medium text-foreground">Upload or capture food label</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Ingredients and nutrition panel work best</p>
+              {liveCameraActive ? (
+                <div className="relative overflow-hidden rounded-2xl border bg-foreground/90">
+                  <video
+                    ref={photoVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="max-h-80 w-full object-contain"
+                  />
+                  <div className="absolute inset-x-0 bottom-0 flex justify-center gap-3 p-4 bg-gradient-to-t from-black/70 to-transparent">
+                    <Button type="button" onClick={snapPhotoFromStream} className="rounded-xl px-5">
+                      <Camera className="mr-2 size-4" /> Capture Photo
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={stopAllCameras} className="rounded-xl">
+                      <X className="size-4" /> Cancel
+                    </Button>
+                  </div>
                 </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-secondary/50 p-8 text-center">
+                  <ImageUp className="size-8 text-primary" />
+                  <div>
+                    <p className="font-medium text-foreground">Upload or capture food label</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Ingredients and nutrition panel work best</p>
+                  </div>
 
-                {/* Hidden File Inputs controlled via explicit refs */}
-                <input
-                  ref={cameraInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => {
-                    void handleFileSelection(e.target.files?.[0]);
-                    e.target.value = "";
-                  }}
-                />
-                <input
-                  ref={galleryInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    void handleFileSelection(e.target.files?.[0]);
-                    e.target.value = "";
-                  }}
-                />
+                  <input
+                    ref={galleryInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      void handleGallerySelection(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                  />
 
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                  <Button
-                    type="button"
-                    onClick={() => cameraInputRef.current?.click()}
-                    className="inline-flex items-center gap-2 rounded-xl"
-                  >
-                    <Camera className="size-4" />
-                    Take Photo
-                  </Button>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <Button
+                      type="button"
+                      onClick={startPhotoCamera}
+                      className="inline-flex items-center gap-2 rounded-xl"
+                    >
+                      <Camera className="size-4" />
+                      Take Photo
+                    </Button>
 
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => galleryInputRef.current?.click()}
-                    className="inline-flex items-center gap-2 rounded-xl"
-                  >
-                    <ImageIcon className="size-4" />
-                    Choose from Gallery
-                  </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => galleryInputRef.current?.click()}
+                      className="inline-flex items-center gap-2 rounded-xl"
+                    >
+                      <ImageIcon className="size-4" />
+                      Choose from Gallery
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {preview && (
+              {preview && !liveCameraActive && (
                 <img
                   src={preview}
                   alt="Scanned food package"
@@ -286,9 +326,9 @@ export function FoodScanner() {
 
           {mode === "camera" && (
             <div className="space-y-3">
-              {cameraOn ? (
+              {liveCameraActive ? (
                 <div className="relative overflow-hidden rounded-2xl border bg-foreground/90">
-                  <video ref={videoRef} playsInline muted className="max-h-80 w-full object-contain" />
+                  <video ref={barcodeVideoRef} playsInline muted className="max-h-80 w-full object-contain" />
                   <div className="pointer-events-none absolute inset-x-10 top-1/2 h-24 -translate-y-1/2 rounded-xl border-2 border-accent" />
                   <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
                     <span className="inline-flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
@@ -296,10 +336,7 @@ export function FoodScanner() {
                     </span>
                   </div>
                   <div className="absolute inset-x-0 bottom-0 flex justify-center gap-2 p-3">
-                    <Button type="button" onClick={captureFrame}>
-                      Capture instead
-                    </Button>
-                    <Button type="button" variant="secondary" onClick={stopCamera}>
+                    <Button type="button" variant="secondary" onClick={stopAllCameras}>
                       <X className="size-4" /> Stop
                     </Button>
                   </div>
@@ -310,7 +347,7 @@ export function FoodScanner() {
                   <p className="mb-4 text-sm text-muted-foreground">
                     We detect the code automatically and pull the product details.
                   </p>
-                  <Button type="button" onClick={startCamera}>
+                  <Button type="button" onClick={startBarcodeCamera}>
                     <Camera className="size-4" /> Open camera
                   </Button>
                 </div>
