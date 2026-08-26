@@ -11,8 +11,8 @@ export const analyzeFood = createServerFn({ method: "POST" })
     return input;
   })
   .handler(async ({ data }): Promise<Analysis> => {
-    const apiKey = process.env["LOVABLE_API_KEY"];
-    if (!apiKey) throw new Error("AI is not configured for this project.");
+    const apiKey = process.env["GEMINI_API_KEY"];
+if (!apiKey) throw new Error("GEMINI_API_KEY is not configured for this project.");
     const { performFoodAnalysis } = await import("./analyze.server");
     return performFoodAnalysis(data, apiKey);
   });
