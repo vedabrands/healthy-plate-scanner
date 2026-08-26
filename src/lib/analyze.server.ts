@@ -161,20 +161,14 @@ function normalizeAnalysis(value: unknown, input: AnalysisInput, match: ProductM
   };
 }
 
-/*
-  New features:
-  - scanCache: in-memory Map keyed by barcode digits or normalized food name with 24h TTL.
-  - callGemini: tries a list of non-deprecated models (gemini-2.0-flash then fallbacks) and retries on 429 with 1.5s backoff.
-  - performFoodAnalysis uses cache to avoid repeated Gemini calls for identical scans.
-*/
+// --- New: dynamic model discovery + cache + rate-limit handling + scan cache ---
 
 type CachedEntry = {
   expires: number;
   promise: Promise<Analysis>;
 };
 
-// 24 hours TTL
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const scanCache = new Map<string, CachedEntry>();
 
 function getCacheKeyForInput(data: AnalysisInput): string | null {
@@ -192,107 +186,144 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function callGeminiWithFallback(apiKey: string, requestBody: unknown) {
-  // Models to try in order. Do NOT include gemini-2.5-flash or gemini-1.5-flash (raw).
-  const models = ["gemini-2.0-flash", "gemini-2.0-flash-001", "gemini-1.5-flash-latest"];
-  const max429Retries = 4; // attempt up to this many times when receiving 429 (including first attempt)
-  const backoffMs = 1500; // 1.5s backoff per requirement
+// Cache the resolved model name once per process
+let resolvedModelName: string | null = null;
+let resolvingModelPromise: Promise<string> | null = null;
 
-  let lastError: Error | null = null;
+async function resolveGeminiModel(apiKey: string): Promise<string> {
+  if (resolvedModelName) return resolvedModelName;
+  if (resolvingModelPromise) return resolvingModelPromise;
 
-  for (const model of models) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-    let attempt = 0;
-    while (true) {
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-        });
+  resolvingModelPromise = (async () => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+    try {
+      const res = await fetch(url, { method: "GET", headers: { "Content-Type": "application/json" } });
+      if (!res.ok) throw new Error(`Failed to list models: ${res.status}`);
+      const json = await res.json();
+      const models = Array.isArray(json?.models) ? json.models : [];
 
-        if (response.status === 404) {
-          // This model isn't available on this endpoint — try next model
-          lastError = new Error(`Model ${model} returned 404 (not found)`);
-          break; // break the retry loop and try next model
-        }
+      // Helper to stringify model for capability checks
+      const modelText = (m: any) => JSON.stringify(m || {}).toLowerCase();
 
-        if (response.status === 429) {
-          attempt++;
-          lastError = new Error(`Gemini 429 rate limit for model ${model}`);
-          if (attempt < max429Retries) {
-            // wait and retry
-            await sleep(backoffMs);
-            continue;
-          } else {
-            // exhausted retries for this model; try next model after recording lastError
-            break;
-          }
-        }
-
-        // For other non-OK responses, capture and throw (we don't retry other statuses here)
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Gemini API Error (${response.status}): ${errorText.slice(0, 180)}`);
-        }
-
-        // Successful response
-        const json = await response.json();
-        return json;
-      } catch (err) {
-        // Network or thrown error: if it looks like a transient 429 or network error, retry per attempt limits
-        // If this was due to an early thrown 429 exhaustion, break and try next model.
-        const message = (err instanceof Error && err.message) ? err.message : String(err);
-        // If message contains 429 or rate limit, we've already handled attempts; break to try next model.
-        if (message.includes("429") || message.toLowerCase().includes("rate limit")) {
-          // if we've exhausted attempts for this model, break inner loop to try the next model
-          break;
-        }
-        // For other errors, don't try fallback models immediately — set lastError and break
-        lastError = err instanceof Error ? err : new Error(String(err));
-        break;
+      // Prefer models that include 'flash' in the name and support generateContent
+      const flashWithGenerate = models.find((m: any) => {
+        const name: string = m?.name ?? "";
+        return /flash/i.test(name) && modelText(m).includes("generatecontent");
+      });
+      if (flashWithGenerate?.name) {
+        resolvedModelName = flashWithGenerate.name;
+        return resolvedModelName;
       }
-    } // retry loop
-    // try next model
-  } // models loop
 
-  throw lastError ?? new Error("No supported Gemini model available (tried gemini-2.0-flash family and gemini-1.5-flash-latest).");
+      // Next, any model that supports generateContent
+      const anyGenerate = models.find((m: any) => modelText(m).includes("generatecontent") && typeof m?.name === "string");
+      if (anyGenerate?.name) {
+        resolvedModelName = anyGenerate.name;
+        return resolvedModelName;
+      }
+
+      // Fallback: pick first model with 'flash' in the name
+      const flashModel = models.find((m: any) => /flash/i.test(m?.name ?? ""));
+      if (flashModel?.name) {
+        resolvedModelName = flashModel.name;
+        return resolvedModelName;
+      }
+
+      // Final fallback: pick first model that appears to be a text model
+      const textModel = models.find((m: any) => modelText(m).includes("text") && typeof m?.name === "string");
+      if (textModel?.name) {
+        resolvedModelName = textModel.name;
+        return resolvedModelName;
+      }
+
+      throw new Error("No suitable Gemini model found for this API key.");
+    } finally {
+      resolvingModelPromise = null;
+    }
+  })();
+
+  return resolvingModelPromise;
+}
+
+async function callGemini(apiKey: string, requestBody: unknown): Promise<any> {
+  // Resolve model (cached)
+  let model = await resolveGeminiModel(apiKey);
+  const maxRetries = 4; // retry on 429 up to this many times
+  const backoffMs = 1500;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`;
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+    } catch (err) {
+      // Network error - retry after backoff
+      if (attempt < maxRetries - 1) {
+        await sleep(backoffMs);
+        continue;
+      }
+      throw err;
+    }
+
+    if (response.status === 404) {
+      // Model not found for this API key - invalidate cached resolved model and try to re-resolve once
+      resolvedModelName = null;
+      try {
+        model = await resolveGeminiModel(apiKey);
+        // retry immediately with new model (counts toward attempts)
+        if (attempt < maxRetries - 1) continue;
+      } catch (err) {
+        // If we can't resolve a model, throw
+        throw new Error(`Model resolution failed after 404: ${(err as Error).message}`);
+      }
+    }
+
+    if (response.status === 429) {
+      // Rate limited - backoff and retry
+      if (attempt < maxRetries - 1) {
+        await sleep(backoffMs);
+        continue;
+      }
+      const errorText = await response.text();
+      throw new Error(`Gemini rate limit (429): ${errorText}`);
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gemini API Error (${response.status}): ${errorText.slice(0, 180)}`);
+    }
+
+    // success
+    return response.json();
+  }
+
+  throw new Error("Gemini call failed after retries");
 }
 
 export async function performFoodAnalysis(data: AnalysisInput, apiKey: string): Promise<Analysis> {
-  // Use cache key only if barcode or name provided per requirements
   const cacheKey = getCacheKeyForInput(data);
   const now = Date.now();
 
   if (cacheKey) {
-    const entry = scanCache.get(cacheKey);
-    if (entry && entry.expires > now) {
+    const existing = scanCache.get(cacheKey);
+    if (existing && existing.expires > now) {
       try {
-        return await entry.promise;
+        return await existing.promise;
       } catch {
-        // If a previous cached attempt failed, remove it to allow fresh retry
         scanCache.delete(cacheKey);
       }
     }
   }
 
-  // computePromise wraps the analysis pipeline and will be stored in the cache immediately
   const computePromise = (async (): Promise<Analysis> => {
     const match = data.barcode ? await lookupBarcode(data.barcode) : null;
     const product = match?.product;
     const evidence = match
-      ? `VERIFIED PRODUCT DATABASE MATCH (${match.source}; matched barcode ${match.matchedCode}):
-name: ${product?.product_name ?? "not available"}
-brand: ${product?.brands ?? "not available"}
-quantity: ${product?.quantity ?? "not available"}
-categories: ${product?.categories ?? "not available"}
-ingredients: ${product?.ingredients_text ?? "not available"}
-allergens: ${product?.allergens ?? "not available"}; traces: ${product?.traces ?? "not available"}
-NOVA processing group: ${product?.nova_group ?? "not available"}
-database nutrition grade: ${product?.nutrition_grades ?? product?.nutriscore_grade ?? "not available"}
-additives: ${(product?.additives_tags ?? []).join(", ") || "none listed"}
-nutriments per 100g: ${JSON.stringify(product?.nutriments ?? {}).slice(0, 3500)}
-record completeness: ${product?.completeness ?? "not available"}`
+      ? `VERIFIED PRODUCT DATABASE MATCH (${match.source}; matched barcode ${match.matchedCode}):\nname: ${product?.product_name ?? "not available"}\nbrand: ${product?.brands ?? "not available"}\nquantity: ${product?.quantity ?? "not available"}\ncategories: ${product?.categories ?? "not available"}\ningredients: ${product?.ingredients_text ?? "not available"}\nallergens: ${product?.allergens ?? "not available"}; traces: ${product?.traces ?? "not available"}\nNOVA processing group: ${product?.nova_group ?? "not available"}\ndatabase nutrition grade: ${product?.nutrition_grades ?? product?.nutriscore_grade ?? "not available"}\nadditives: ${(product?.additives_tags ?? []).join(", ") || "none listed"}\nnutriments per 100g: ${JSON.stringify(product?.nutriments ?? {}).slice(0, 3500)}\nrecord completeness: ${product?.completeness ?? "not available"}`
       : data.barcode
         ? `Barcode ${data.barcode.replace(/\D/g, "")} was not found in either product database. Do not guess its identity. Use only a supplied name or visible label; otherwise identify it as an unknown [...]`
         : "";
@@ -315,30 +346,16 @@ record completeness: ${product?.completeness ?? "not available"}`
         ? data.imageBase64.split(",")[1]
         : data.imageBase64;
 
-      parts.push({
-        inline_data: {
-          mime_type: mimeType,
-          data: base64Data,
-        },
-      });
+      parts.push({ inline_data: { mime_type: mimeType, data: base64Data } });
     }
 
     const requestBody = {
-      system_instruction: {
-        parts: [{ text: SYSTEM_PROMPT }],
-      },
-      contents: [
-        {
-          parts,
-        },
-      ],
-      generationConfig: {
-        response_mime_type: "application/json",
-      },
+      system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      contents: [{ parts }],
+      generationConfig: { response_mime_type: "application/json" },
     };
 
-    // callGeminiWithFallback will try models in order and handle 429 retries/backoff
-    const json = await callGeminiWithFallback(apiKey, requestBody);
+    const json = await callGemini(apiKey, requestBody);
 
     const rawText = (json as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }).candidates?.[0]?.content?.parts?.[0]?.text ?? "";
     const parsed = extractJson(rawText);
@@ -346,19 +363,15 @@ record completeness: ${product?.completeness ?? "not available"}`
   })();
 
   if (cacheKey) {
-    // store in cache
     scanCache.set(cacheKey, { promise: computePromise, expires: now + CACHE_TTL_MS });
-    // cleanup expired entries opportunistically (cheap)
-    for (const [k, v] of scanCache.entries()) {
-      if (v.expires <= Date.now()) scanCache.delete(k);
-    }
+    // cleanup expired
+    for (const [k, v] of scanCache.entries()) if (v.expires <= Date.now()) scanCache.delete(k);
   }
 
   try {
     const result = await computePromise;
     return result;
   } catch (err) {
-    // If cached, remove failed entry so future attempts can retry
     if (cacheKey) scanCache.delete(cacheKey);
     throw err;
   }
