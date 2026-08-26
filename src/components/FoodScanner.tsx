@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Camera, FolderImage, ImageUp, Keyboard, Loader2, ScanLine, Search, X } from "lucide-react";
+import { Camera, Image, ImageUp, Keyboard, Loader2, ScanLine, Search, X } from "lucide-react";
 import { analyzeFood, type Analysis } from "@/lib/analyze.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
