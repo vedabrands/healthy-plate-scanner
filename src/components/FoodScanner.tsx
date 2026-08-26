@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Camera, Image, ImageUp, Keyboard, Loader2, ScanLine, Search, X } from "lucide-react";
+import { Camera, Image as ImageIcon, ImageUp, Keyboard, Loader2, ScanLine, Search, X } from "lucide-react";
 import { analyzeFood, type Analysis } from "@/lib/analyze.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -26,20 +26,19 @@ async function compressImageFile(file: File): Promise<string> {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        const MAX_WIDTH = 1024;
-        const MAX_HEIGHT = 1024;
+        const MAX_DIM = 1024;
         let width = img.width;
         let height = img.height;
 
         if (width > height) {
-          if (width > MAX_WIDTH) {
-            height = Math.round((height * MAX_WIDTH) / width);
-            width = MAX_WIDTH;
+          if (width > MAX_DIM) {
+            height = Math.round((height * MAX_DIM) / width);
+            width = MAX_DIM;
           }
         } else {
-          if (height > MAX_HEIGHT) {
-            width = Math.round((width * MAX_HEIGHT) / height);
-            height = MAX_HEIGHT;
+          if (height > MAX_DIM) {
+            width = Math.round((width * MAX_DIM) / height);
+            height = MAX_DIM;
           }
         }
 
@@ -65,9 +64,13 @@ export function FoodScanner() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Analysis | null>(null);
   const [cameraOn, setCameraOn] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const scannerControlsRef = useRef<{ stop: () => void } | null>(null);
   const scanLockedRef = useRef(false);
+
   const analyze = useServerFn(analyzeFood);
   const { user } = useAuth();
 
@@ -85,6 +88,7 @@ export function FoodScanner() {
     setResult(null);
     try {
       const res = await analyze({ data: payload });
+      if (!res) throw new Error("No response received from scanner.");
       setResult(res);
       if (user) {
         await supabase.from("scans").insert({
@@ -99,19 +103,20 @@ export function FoodScanner() {
         });
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Something went wrong");
+      toast.error(e instanceof Error ? e.message : "Something went wrong during analysis");
     } finally {
       setLoading(false);
     }
   };
 
-  const onFile = async (file: File) => {
+  const handleFileSelection = async (file?: File) => {
+    if (!file) return;
     try {
-      const compressedDataUrl = await compressImageFile(file);
-      setPreview(compressedDataUrl);
-      void run({ imageBase64: compressedDataUrl, name: text.trim() || undefined });
+      const compressed = await compressImageFile(file);
+      setPreview(compressed);
+      await run({ imageBase64: compressed, name: text.trim() || undefined });
     } catch {
-      toast.error("Failed to process image. Please try again.");
+      toast.error("Failed to read image file.");
     }
   };
 
@@ -168,20 +173,19 @@ export function FoodScanner() {
     const video = videoRef.current;
     if (!video) return;
     const canvas = document.createElement("canvas");
-    const MAX_WIDTH = 1024;
-    const MAX_HEIGHT = 1024;
+    const MAX_DIM = 1024;
     let width = video.videoWidth;
     let height = video.videoHeight;
 
     if (width > height) {
-      if (width > MAX_WIDTH) {
-        height = Math.round((height * MAX_WIDTH) / width);
-        width = MAX_WIDTH;
+      if (width > MAX_DIM) {
+        height = Math.round((height * MAX_DIM) / width);
+        width = MAX_DIM;
       }
     } else {
-      if (height > MAX_HEIGHT) {
+      if (height > MAX_DIM) {
         width = Math.round((width * MAX_HEIGHT) / height);
-        height = MAX_HEIGHT;
+        height = MAX_DIM;
       }
     }
 
@@ -225,45 +229,58 @@ export function FoodScanner() {
                   <p className="text-xs text-muted-foreground mt-0.5">Ingredients and nutrition panel work best</p>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                  <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90">
-                    <Camera className="size-4" />
-                    <span>Take Photo</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) void onFile(f);
-                      }}
-                    />
-                  </label>
+                {/* Hidden File Inputs controlled via explicit refs */}
+                <input
+                  ref={cameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => {
+                    void handleFileSelection(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <input
+                  ref={galleryInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    void handleFileSelection(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
 
-                  <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-input bg-background px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition hover:bg-accent hover:text-accent-foreground">
-                    <Image className="size-4" />
-                    <span>Choose from Gallery</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) void onFile(f);
-                      }}
-                    />
-                  </label>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <Button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-xl"
+                  >
+                    <Camera className="size-4" />
+                    Take Photo
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => galleryInputRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-xl"
+                  >
+                    <ImageIcon className="size-4" />
+                    Choose from Gallery
+                  </Button>
                 </div>
               </div>
 
-              {preview ? (
+              {preview && (
                 <img
                   src={preview}
                   alt="Scanned food package"
-                  className="mx-auto max-h-56 rounded-2xl border object-contain"
+                  className="mx-auto max-h-56 rounded-2xl border object-contain shadow-sm"
                 />
-              ) : null}
+              )}
             </div>
           )}
 
