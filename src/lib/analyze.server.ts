@@ -208,7 +208,7 @@ record completeness: ${product?.completeness ?? "not available"}`
   }
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -229,9 +229,10 @@ record completeness: ${product?.completeness ?? "not available"}`
   );
 
   if (!response.ok) {
-    if (response.status === 429) throw new Error("Too many scans right now — please try again shortly.");
-    console.error("Gemini API error", response.status, (await response.text()).slice(0, 500));
-    throw new Error("The food analysis service is temporarily unavailable.");
+    const errorText = await response.text();
+    console.error("Gemini API error:", response.status, errorText);
+    if (response.status === 429) throw new Error("Rate limit exceeded — please try again shortly.");
+    throw new Error(`Gemini API Error (${response.status}): ${errorText.slice(0, 180)}`);
   }
 
   const json = (await response.json()) as {
