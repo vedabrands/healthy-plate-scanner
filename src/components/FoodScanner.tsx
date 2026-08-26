@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Camera, ImageUp, Keyboard, Loader2, ScanLine, Search, X } from "lucide-react";
+import { Camera, FolderImage, ImageUp, Keyboard, Loader2, ScanLine, Search, X } from "lucide-react";
 import { analyzeFood, type Analysis } from "@/lib/analyze.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -18,6 +18,44 @@ const modes: { id: Mode; label: string; icon: typeof Camera }[] = [
   { id: "manual", label: "Enter barcode", icon: Keyboard },
   { id: "search", label: "Search by name", icon: Search },
 ];
+
+async function compressImageFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_WIDTH = 1024;
+        const MAX_HEIGHT = 1024;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height = Math.round((height * MAX_WIDTH) / width);
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width = Math.round((width * MAX_HEIGHT) / height);
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.75));
+      };
+      img.onerror = reject;
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export function FoodScanner() {
   const [mode, setMode] = useState<Mode>("photo");
@@ -67,14 +105,14 @@ export function FoodScanner() {
     }
   };
 
-  const onFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result);
-      setPreview(dataUrl);
-      void run({ imageBase64: dataUrl, name: text.trim() || undefined });
-    };
-    reader.readAsDataURL(file);
+  const onFile = async (file: File) => {
+    try {
+      const compressedDataUrl = await compressImageFile(file);
+      setPreview(compressedDataUrl);
+      void run({ imageBase64: compressedDataUrl, name: text.trim() || undefined });
+    } catch {
+      toast.error("Failed to process image. Please try again.");
+    }
   };
 
   const startCamera = async () => {
@@ -130,10 +168,27 @@ export function FoodScanner() {
     const video = videoRef.current;
     if (!video) return;
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d")?.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    const MAX_WIDTH = 1024;
+    const MAX_HEIGHT = 1024;
+    let width = video.videoWidth;
+    let height = video.videoHeight;
+
+    if (width > height) {
+      if (width > MAX_WIDTH) {
+        height = Math.round((height * MAX_WIDTH) / width);
+        width = MAX_WIDTH;
+      }
+    } else {
+      if (height > MAX_HEIGHT) {
+        width = Math.round((width * MAX_HEIGHT) / height);
+        height = MAX_HEIGHT;
+      }
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext("2d")?.drawImage(video, 0, 0, width, height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
     stopCamera();
     setPreview(dataUrl);
     void run({ imageBase64: dataUrl });
@@ -162,24 +217,46 @@ export function FoodScanner() {
 
         <div className="mt-5">
           {mode === "photo" && (
-            <div className="space-y-3">
-              <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border bg-secondary/50 p-10 text-center transition-colors hover:border-primary">
-                <ImageUp className="size-7 text-primary" />
-                <span className="font-medium">Upload or snap the pack / label</span>
-                <span className="text-sm text-muted-foreground">
-                  Ingredients list works best
-                </span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) onFile(f);
-                  }}
-                />
-              </label>
+            <div className="space-y-4">
+              <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-secondary/50 p-8 text-center">
+                <ImageUp className="size-8 text-primary" />
+                <div>
+                  <p className="font-medium text-foreground">Upload or capture food label</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Ingredients and nutrition panel work best</p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90">
+                    <Camera className="size-4" />
+                    <span>Take Photo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void onFile(f);
+                      }}
+                    />
+                  </label>
+
+                  <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-input bg-background px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition hover:bg-accent hover:text-accent-foreground">
+                    <FolderImage className="size-4" />
+                    <span>Choose from Gallery</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void onFile(f);
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
               {preview ? (
                 <img
                   src={preview}
