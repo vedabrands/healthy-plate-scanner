@@ -20,6 +20,10 @@ type Product = {
 
 type ProductMatch = { product: Product; source: string; matchedCode: string };
 
+// In-memory cache to save API quota across scans
+const scanCache = new Map<string, { data: Analysis; expiresAt: number }>();
+const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
+
 const SYSTEM_PROMPT = `You are a careful, evidence-led food-health analyst. Grade a food for everyday health using verified package or database evidence first.
 
 Grading scale: A = whole/minimally processed and genuinely healthy; B = decent with minor issues; C = average, best occasionally; D = poor; E = very poor ultra-processed food; F = exceptionally harmful formulation.
@@ -162,6 +166,15 @@ function normalizeAnalysis(value: unknown, input: AnalysisInput, match: ProductM
 }
 
 export async function performFoodAnalysis(data: AnalysisInput, apiKey: string): Promise<Analysis> {
+  // Check Cache first if querying by barcode or standardized name
+  const cacheKey = data.barcode?.replace(/\D/g, "") || data.name?.trim().toLowerCase();
+  if (cacheKey && !data.imageBase64) {
+    const cached = scanCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
+  }
+
   const match = data.barcode ? await lookupBarcode(data.barcode) : null;
   const product = match?.product;
   const evidence = match
@@ -207,38 +220,65 @@ record completeness: ${product?.completeness ?? "not available"}`
     });
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [{ text: SYSTEM_PROMPT }],
-        },
-        contents: [
-          {
-            parts,
-          },
-        ],
-        generationConfig: {
-          response_mime_type: "application/json",
-        },
-      }),
-    }
-  );
+  // Model fallback chain: try flash model first, fallback to standard if needed
+  const models = ["gemini-2.5-flash", "gemini-1.5-flash"];
+  let rawText = "";
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Gemini API error:", response.status, errorText);
-    if (response.status === 429) throw new Error("Rate limit exceeded — please try again shortly.");
-    throw new Error(`Gemini API Error (${response.status}): ${errorText.slice(0, 180)}`);
+  for (const model of models) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            system_instruction: {
+              parts: [{ text: SYSTEM_PROMPT }],
+            },
+            contents: [{ parts }],
+            generationConfig: {
+              response_mime_type: "application/json",
+            },
+          }),
+        }
+      );
+
+      if (response.status === 429) {
+        // Wait 1.2s before trying alternative fallback
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        continue;
+      }
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`API Error (${response.status}): ${errText.slice(0, 150)}`);
+      }
+
+      const json = (await response.json()) as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+
+      rawText = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      if (rawText) break;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
   }
 
-  const json = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
+  if (!rawText) {
+    throw lastError || new Error("Traffic is currently high. Please wait a few seconds and try scanning again.");
+  }
 
-  const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  return normalizeAnalysis(extractJson(rawText), data, match);
+  const analysisResult = normalizeAnalysis(extractJson(rawText), data, match);
+
+  // Cache valid result
+  if (cacheKey && !data.imageBase64) {
+    scanCache.set(cacheKey, {
+      data: analysisResult,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
+  }
+
+  return analysisResult;
 }
