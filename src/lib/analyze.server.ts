@@ -20,8 +20,8 @@ type Product = {
 
 type ProductMatch = { product: Product; source: string; matchedCode: string };
 
-// In-memory cache to save API quota across scans
-const scanCache = new Map<string, { data: Analysis; expiresAt: number }>();
+// In-memory cache to prevent redundant API calls
+const cache = new Map<string, { data: Analysis; expiresAt: number }>();
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
 
 const SYSTEM_PROMPT = `You are a careful, evidence-led food-health analyst. Grade a food for everyday health using verified package or database evidence first.
@@ -54,7 +54,7 @@ function barcodeVariants(value: string): string[] {
 async function fetchJson(url: string): Promise<unknown | null> {
   try {
     const response = await fetch(url, {
-      headers: { "User-Agent": "NutriGrade/1.1 (food analysis app)" },
+      headers: { "User-Agent": "NutriGrade/1.1 (https://healthy-plate-scanner.vercel.app)" },
       signal: AbortSignal.timeout(6500),
     });
     if (!response.ok) return null;
@@ -166,12 +166,12 @@ function normalizeAnalysis(value: unknown, input: AnalysisInput, match: ProductM
 }
 
 export async function performFoodAnalysis(data: AnalysisInput, apiKey: string): Promise<Analysis> {
-  // Check Cache first if querying by barcode or standardized name
-  const cacheKey = data.barcode?.replace(/\D/g, "") || data.name?.trim().toLowerCase();
+  // Check memory cache first
+  const cacheKey = data.barcode?.replace(/\D/g, "") || (data.name ? data.name.trim().toLowerCase() : null);
   if (cacheKey && !data.imageBase64) {
-    const cached = scanCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.data;
+    const cachedItem = cache.get(cacheKey);
+    if (cachedItem && cachedItem.expiresAt > Date.now()) {
+      return cachedItem.data;
     }
   }
 
@@ -220,39 +220,38 @@ record completeness: ${product?.completeness ?? "not available"}`
     });
   }
 
-  // Model fallback chain: try flash model first, fallback to standard if needed
-  const models = ["gemini-2.5-flash"];
   let rawText = "";
-  let lastError: Error | null = null;
+  let lastErrorText = "";
 
-  for (const model of models) {
+  // Retry up to 2 times if temporary rate limiting or connection delays occur
+  for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const response = await fetch(
-  `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-  {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      system_instruction: {
-        parts: [{ text: SYSTEM_PROMPT }],
-      },
-      contents: [{ parts }],
-      generationConfig: {
-        response_mime_type: "application/json",
-      },
-    }),
-  }
-);
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            system_instruction: {
+              parts: [{ text: SYSTEM_PROMPT }],
+            },
+            contents: [{ parts }],
+            generationConfig: {
+              response_mime_type: "application/json",
+            },
+          }),
+        }
+      );
 
       if (response.status === 429) {
-        // Wait 1.2s before trying alternative fallback
-        await new Promise((resolve) => setTimeout(resolve, 1200));
+        lastErrorText = "Rate limit reached on API. Retrying shortly...";
+        await new Promise((resolve) => setTimeout(resolve, 1500));
         continue;
       }
 
       if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`API Error (${response.status}): ${errText.slice(0, 150)}`);
+        lastErrorText = await response.text();
+        break;
       }
 
       const json = (await response.json()) as {
@@ -262,19 +261,24 @@ record completeness: ${product?.completeness ?? "not available"}`
       rawText = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
       if (rawText) break;
     } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
+      lastErrorText = err instanceof Error ? err.message : String(err);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
 
   if (!rawText) {
-    throw lastError || new Error("Traffic is currently high. Please wait a few seconds and try scanning again.");
+    throw new Error(
+      lastErrorText
+        ? `Analysis service error: ${lastErrorText.slice(0, 160)}`
+        : "Traffic is currently high. Please try scanning again."
+    );
   }
 
   const analysisResult = normalizeAnalysis(extractJson(rawText), data, match);
 
-  // Cache valid result
+  // Save to cache
   if (cacheKey && !data.imageBase64) {
-    scanCache.set(cacheKey, {
+    cache.set(cacheKey, {
       data: analysisResult,
       expiresAt: Date.now() + CACHE_TTL_MS,
     });
