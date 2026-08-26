@@ -22,7 +22,7 @@ type ProductMatch = { product: Product; source: string; matchedCode: string };
 
 const SYSTEM_PROMPT = `You are a careful, evidence-led food-health analyst. Grade a food for everyday health using verified package or database evidence first.
 
-Grading scale: A = whole/minimally processed and genuinely healthy; B = decent with minor issues; C = average, best occasionally; D = poor; E = very poor ultra-processed food; F = exceptionally harmfu[...]
+Grading scale: A = whole/minimally processed and genuinely healthy; B = decent with minor issues; C = average, best occasionally; D = poor; E = very poor ultra-processed food; F = exceptionally ha[...]
 
 Accuracy rules:
 - Never invent an ingredient, nutrient amount, brand, or product identity.
@@ -190,6 +190,14 @@ function sleep(ms: number) {
 let resolvedModelName: string | null = null;
 let resolvingModelPromise: Promise<string> | null = null;
 
+function shortModelName(rawName: unknown): string | null {
+  if (!rawName) return null;
+  const s = String(rawName);
+  // if the name contains slashes (projects/.../models/xyz or models/xyz), return last segment
+  const parts = s.split("/");
+  return parts.length ? parts[parts.length - 1] : s;
+}
+
 async function resolveGeminiModel(apiKey: string): Promise<string> {
   if (resolvedModelName) return resolvedModelName;
   if (resolvingModelPromise) return resolvingModelPromise;
@@ -207,32 +215,32 @@ async function resolveGeminiModel(apiKey: string): Promise<string> {
 
       // Prefer models that include 'flash' in the name and support generateContent
       const flashWithGenerate = models.find((m: any) => {
-        const name: string = m?.name ?? "";
+        const name: string = shortModelName(m?.name) ?? "";
         return /flash/i.test(name) && modelText(m).includes("generatecontent");
       });
       if (flashWithGenerate?.name) {
-        resolvedModelName = flashWithGenerate.name;
+        resolvedModelName = shortModelName(flashWithGenerate.name) as string;
         return resolvedModelName;
       }
 
       // Next, any model that supports generateContent
       const anyGenerate = models.find((m: any) => modelText(m).includes("generatecontent") && typeof m?.name === "string");
       if (anyGenerate?.name) {
-        resolvedModelName = anyGenerate.name;
+        resolvedModelName = shortModelName(anyGenerate.name) as string;
         return resolvedModelName;
       }
 
       // Fallback: pick first model with 'flash' in the name
-      const flashModel = models.find((m: any) => /flash/i.test(m?.name ?? ""));
+      const flashModel = models.find((m: any) => /flash/i.test(String(m?.name ?? "")));
       if (flashModel?.name) {
-        resolvedModelName = flashModel.name;
+        resolvedModelName = shortModelName(flashModel.name) as string;
         return resolvedModelName;
       }
 
       // Final fallback: pick first model that appears to be a text model
       const textModel = models.find((m: any) => modelText(m).includes("text") && typeof m?.name === "string");
       if (textModel?.name) {
-        resolvedModelName = textModel.name;
+        resolvedModelName = shortModelName(textModel.name) as string;
         return resolvedModelName;
       }
 
