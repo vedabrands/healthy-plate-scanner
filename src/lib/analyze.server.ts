@@ -221,7 +221,7 @@ record completeness: ${product?.completeness ?? "not available"}`
   }
 
   // Model fallback chain: try flash model first, fallback to standard if needed
-  const models = ["gemini-2.5-flash", "gemini-1.5-flash"];
+  const models = ["gemini-2.5-flash"];
   let rawText = "";
   let lastError: Error | null = null;
 
