@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Camera, ImageUp, Keyboard, Loader2, Search, X } from "lucide-react";
+import { Camera, ImageUp, Keyboard, Loader2, ScanLine, Search, X } from "lucide-react";
 import { analyzeFood, type Analysis } from "@/lib/analyze.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -28,13 +28,15 @@ export function FoodScanner() {
   const [result, setResult] = useState<Analysis | null>(null);
   const [cameraOn, setCameraOn] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const scannerControlsRef = useRef<{ stop: () => void } | null>(null);
+  const scanLockedRef = useRef(false);
   const analyze = useServerFn(analyzeFood);
   const { user } = useAuth();
 
   const stopCamera = () => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    scannerControlsRef.current?.stop();
+    scannerControlsRef.current = null;
+    scanLockedRef.current = false;
     setCameraOn(false);
   };
 
@@ -77,51 +79,51 @@ export function FoodScanner() {
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      });
-      streamRef.current = stream;
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera unavailable");
       setCameraOn(true);
-      requestAnimationFrame(async () => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-        }
-        void detectLoop();
-      });
-    } catch {
-      toast.error("Couldn't open the camera. Try a photo or type the barcode instead.");
-    }
-  };
-
-  const detectLoop = async () => {
-    const Detector = (window as unknown as { BarcodeDetector?: new (o?: unknown) => { detect: (s: CanvasImageSource) => Promise<{ rawValue: string }[]> } })
-      .BarcodeDetector;
-    if (!Detector) {
-      toast.message("Live barcode scanning isn't supported in this browser — snap a photo of the barcode instead.");
-      return;
-    }
-    const detector = new Detector({
-      formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"],
-    });
-    const tick = async () => {
-      if (!streamRef.current || !videoRef.current) return;
-      try {
-        const codes = await detector.detect(videoRef.current);
-        if (codes.length > 0 && codes[0]?.rawValue) {
-          const code = codes[0].rawValue;
-          stopCamera();
+      scanLockedRef.current = false;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const video = videoRef.current;
+      if (!video) throw new Error("Camera preview unavailable");
+      const [{ BrowserMultiFormatReader }, { BarcodeFormat, DecodeHintType }] = await Promise.all([
+        import("@zxing/browser"),
+        import("@zxing/library"),
+      ]);
+      const formats = [
+        BarcodeFormat.EAN_13,
+        BarcodeFormat.EAN_8,
+        BarcodeFormat.UPC_A,
+        BarcodeFormat.UPC_E,
+        BarcodeFormat.CODE_128,
+        BarcodeFormat.CODE_39,
+        BarcodeFormat.ITF,
+        BarcodeFormat.DATA_MATRIX,
+        BarcodeFormat.QR_CODE,
+      ];
+      const hints = new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 180 });
+      const controls = await reader.decodeFromConstraints(
+        { video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } },
+        video,
+        (scanResult) => {
+          const code = scanResult?.getText().replace(/\D/g, "");
+          if (!code || code.length < 8 || scanLockedRef.current) return;
+          scanLockedRef.current = true;
+          controls.stop();
+          scannerControlsRef.current = null;
+          setCameraOn(false);
           setBarcode(code);
           toast.success(`Barcode ${code} detected`);
           void run({ barcode: code });
-          return;
-        }
-      } catch {
-        /* keep trying */
-      }
-      setTimeout(() => void tick(), 400);
-    };
-    void tick();
+        },
+      );
+      scannerControlsRef.current = controls;
+    } catch {
+      stopCamera();
+      toast.error("Couldn't open the camera. Try a photo or type the barcode instead.");
+    }
   };
 
   const captureFrame = () => {
@@ -142,23 +144,19 @@ export function FoodScanner() {
       <div className="rounded-3xl border bg-card p-4 shadow-soft sm:p-6">
         <div className="flex flex-wrap gap-2">
           {modes.map((m) => (
-            <button
+            <Button
               key={m.id}
               type="button"
+              variant={mode === m.id ? "default" : "secondary"}
               onClick={() => {
                 stopCamera();
                 setMode(m.id);
               }}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors",
-                mode === m.id
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "bg-secondary text-secondary-foreground hover:bg-accent/30",
-              )}
+              className={cn("rounded-full border", mode === m.id && "border-primary")}
             >
               <m.icon className="size-4" />
               {m.label}
-            </button>
+            </Button>
           ))}
         </div>
 
@@ -198,6 +196,11 @@ export function FoodScanner() {
                 <div className="relative overflow-hidden rounded-2xl border bg-foreground/90">
                   <video ref={videoRef} playsInline muted className="max-h-80 w-full object-contain" />
                   <div className="pointer-events-none absolute inset-x-10 top-1/2 h-24 -translate-y-1/2 rounded-xl border-2 border-accent" />
+                  <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
+                    <span className="inline-flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
+                      <ScanLine className="size-4 text-primary" /> Hold steady and fill the frame
+                    </span>
+                  </div>
                   <div className="absolute inset-x-0 bottom-0 flex justify-center gap-2 p-3">
                     <Button type="button" onClick={captureFrame}>
                       Capture instead
