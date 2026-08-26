@@ -242,7 +242,7 @@ export function FoodScanner() {
                   </label>
 
                   <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-input bg-background px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition hover:bg-accent hover:text-accent-foreground">
-                    <FolderImage className="size-4" />
+                    <Image className="size-4" />
                     <span>Choose from Gallery</span>
                     <input
                       type="file"
