@@ -11,7 +11,6 @@ export const lovable = {
       provider: "google" | "apple" | "microsoft" | "lovable",
       opts?: SignInOptions
     ) => {
-      // Map 'lovable' to 'google' fallback if passed
       const targetProvider = provider === "lovable" ? "google" : provider;
 
       const redirectTo =
