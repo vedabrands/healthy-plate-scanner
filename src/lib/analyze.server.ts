@@ -22,7 +22,7 @@ type ProductMatch = { product: Product; source: string; matchedCode: string };
 
 const SYSTEM_PROMPT = `You are a careful, evidence-led food-health analyst. Grade a food for everyday health using verified package or database evidence first.
 
-Grading scale: A = whole/minimally processed and genuinely healthy; B = decent with minor issues; C = average, best occasionally; D = poor; E = very poor ultra-processed food; F = exceptionally ha[...]
+Grading scale: A = whole/minimally processed and genuinely healthy; B = decent with minor issues; C = average, best occasionally; D = poor; E = very poor ultra-processed food; F = exceptionally harmfu [...]
 
 Accuracy rules:
 - Never invent an ingredient, nutrient amount, brand, or product identity.
@@ -33,7 +33,7 @@ Accuracy rules:
 - Give practical, product/category-specific alternatives.
 
 Return ONLY valid JSON, without markdown, in this exact shape:
-{"foodName":string,"brand":string|null,"grade":"A"|"B"|"C"|"D"|"E"|"F","score":number,"verdict":string,"explanation":string,"ingredients":[{"name":string,"concern":string,"severity":"low"|"medium"|"hi[...]
+{"foodName":string,"brand":string|null,"grade":"A"|"B"|"C"|"D"|"E"|"F","score":number,"verdict":string,"explanation":string,"ingredients":[{"name":string,"concern":string,"severity":"low"|"medium"|"hi[...]}
 
 The explanation must be two plain-language paragraphs: what the evidence shows; then why the relevant components matter for health and who should limit or avoid it.`;
 
@@ -188,79 +188,98 @@ function sleep(ms: number) {
 
 // Cache the resolved model name once per process
 let resolvedModelName: string | null = null;
-let resolvingModelPromise: Promise<string> | null = null;
+let resolvingModelPromise: Promise<any> | null = null;
 
-function shortModelName(rawName: unknown): string | null {
+const MODEL_BLACKLIST = new Set([
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-001",
+  "gemini-1.5-flash",
+]);
+
+function sanitizeModelId(rawName: unknown): string | null {
   if (!rawName) return null;
-  const s = String(rawName);
-  // if the name contains slashes (projects/.../models/xyz or models/xyz), return last segment
+  const s = String(rawName).trim();
   const parts = s.split("/");
-  return parts.length ? parts[parts.length - 1] : s;
+  const candidate = parts[parts.length - 1];
+  if (/^[A-Za-z0-9_.-]+$/.test(candidate)) return candidate;
+  return null;
 }
 
-async function resolveGeminiModel(apiKey: string): Promise<string> {
-  if (resolvedModelName) return resolvedModelName;
+async function resolveGeminiModel(apiKey: string): Promise<{ id: string; raw: string }> {
+  if (resolvedModelName) return { id: resolvedModelName, raw: resolvedModelName };
   if (resolvingModelPromise) return resolvingModelPromise;
 
-  resolvingModelPromise = (async () => {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-    try {
-      const res = await fetch(url, { method: "GET", headers: { "Content-Type": "application/json" } });
-      if (!res.ok) throw new Error(`Failed to list models: ${res.status}`);
-      const json = await res.json();
-      const models = Array.isArray(json?.models) ? json.models : [];
+  resolvingModelPromise = (async (): Promise<{ id: string; raw: string }> => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url, { method: "GET", headers: { "Content-Type": "application/json" } });
+    if (!res.ok) throw new Error(`Failed to list Gemini models (${res.status})`);
+    const body = await res.json();
+    const models = Array.isArray(body?.models) ? body.models : [];
 
-      // Helper to stringify model for capability checks
-      const modelText = (m: any) => JSON.stringify(m || {}).toLowerCase();
+    const modelText = (m: any) => JSON.stringify(m || "").toLowerCase();
 
-      // Prefer models that include 'flash' in the name and support generateContent
-      const flashWithGenerate = models.find((m: any) => {
-        const name: string = shortModelName(m?.name) ?? "";
-        return /flash/i.test(name) && modelText(m).includes("generatecontent");
-      });
-      if (flashWithGenerate?.name) {
-        resolvedModelName = shortModelName(flashWithGenerate.name) as string;
-        return resolvedModelName;
+    const candidates: any[] = [];
+
+    for (const m of models) {
+      const raw = String(m?.name ?? "");
+      const id = sanitizeModelId(raw) ?? raw;
+      if (/flash/i.test(raw) && modelText(m).includes("generatecontent") && !MODEL_BLACKLIST.has(id)) {
+        candidates.push(m);
       }
-
-      // Next, any model that supports generateContent
-      const anyGenerate = models.find((m: any) => modelText(m).includes("generatecontent") && typeof m?.name === "string");
-      if (anyGenerate?.name) {
-        resolvedModelName = shortModelName(anyGenerate.name) as string;
-        return resolvedModelName;
-      }
-
-      // Fallback: pick first model with 'flash' in the name
-      const flashModel = models.find((m: any) => /flash/i.test(String(m?.name ?? "")));
-      if (flashModel?.name) {
-        resolvedModelName = shortModelName(flashModel.name) as string;
-        return resolvedModelName;
-      }
-
-      // Final fallback: pick first model that appears to be a text model
-      const textModel = models.find((m: any) => modelText(m).includes("text") && typeof m?.name === "string");
-      if (textModel?.name) {
-        resolvedModelName = shortModelName(textModel.name) as string;
-        return resolvedModelName;
-      }
-
-      throw new Error("No suitable Gemini model found for this API key.");
-    } finally {
-      resolvingModelPromise = null;
     }
+    for (const m of models) {
+      const raw = String(m?.name ?? "");
+      const id = sanitizeModelId(raw) ?? raw;
+      if (modelText(m).includes("generatecontent") && !MODEL_BLACKLIST.has(id) && !candidates.includes(m)) {
+        candidates.push(m);
+      }
+    }
+    for (const m of models) {
+      const raw = String(m?.name ?? "");
+      const id = sanitizeModelId(raw) ?? raw;
+      if (/flash/i.test(raw) && !MODEL_BLACKLIST.has(id) && !candidates.includes(m)) {
+        candidates.push(m);
+      }
+    }
+    for (const m of models) {
+      const raw = String(m?.name ?? "");
+      const id = sanitizeModelId(raw) ?? raw;
+      if (modelText(m).includes("text") && !MODEL_BLACKLIST.has(id) && !candidates.includes(m)) {
+        candidates.push(m);
+      }
+    }
+
+    for (const m of candidates) {
+      const raw = String(m?.name ?? "");
+      const id = sanitizeModelId(raw) ?? raw;
+      if (id && !MODEL_BLACKLIST.has(id)) {
+        resolvedModelName = id;
+        return { id, raw };
+      }
+      if (raw && !MODEL_BLACKLIST.has(raw)) {
+        return { id: raw, raw } as any;
+      }
+    }
+
+    throw new Error("No suitable Gemini model found for this API key.");
   })();
 
-  return resolvingModelPromise;
+  try {
+    return await resolvingModelPromise;
+  } finally {
+    resolvingModelPromise = null;
+  }
 }
 
 async function callGemini(apiKey: string, requestBody: unknown): Promise<any> {
-  // Resolve model (cached)
-  let model = await resolveGeminiModel(apiKey);
-  const maxRetries = 4; // retry on 429 up to this many times
+  const info = await resolveGeminiModel(apiKey);
+  let modelId = info.id;
+  const rawName = info.raw;
+  const maxRetries = 4;
   const backoffMs = 1500;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
     let response: Response;
     try {
       response = await fetch(url, {
@@ -269,7 +288,6 @@ async function callGemini(apiKey: string, requestBody: unknown): Promise<any> {
         body: JSON.stringify(requestBody),
       });
     } catch (err) {
-      // Network error - retry after backoff
       if (attempt < maxRetries - 1) {
         await sleep(backoffMs);
         continue;
@@ -277,35 +295,66 @@ async function callGemini(apiKey: string, requestBody: unknown): Promise<any> {
       throw err;
     }
 
-    if (response.status === 404) {
-      // Model not found for this API key - invalidate cached resolved model and try to re-resolve once
-      resolvedModelName = null;
-      try {
-        model = await resolveGeminiModel(apiKey);
-        // retry immediately with new model (counts toward attempts)
-        if (attempt < maxRetries - 1) continue;
-      } catch (err) {
-        // If we can't resolve a model, throw
-        throw new Error(`Model resolution failed after 404: ${(err as Error).message}`);
-      }
-    }
-
     if (response.status === 429) {
-      // Rate limited - backoff and retry
       if (attempt < maxRetries - 1) {
         await sleep(backoffMs);
         continue;
       }
-      const errorText = await response.text();
-      throw new Error(`Gemini rate limit (429): ${errorText}`);
+      const t = await response.text();
+      throw new Error(`Gemini rate limit (429): ${t}`);
+    }
+
+    if (response.status === 404) {
+      const txt = await response.text();
+      const m = txt.match(/use\s+models\/(?:projects\/[0-9A-Za-z_-]+\/models\/)?([A-Za-z0-9_.-]+)/i) || txt.match(/use\s+([A-Za-z0-9_.-]+-flash)/i);
+      if (m && m[1]) {
+        const suggested = m[1];
+        if (!MODEL_BLACKLIST.has(suggested)) {
+          modelId = suggested;
+          resolvedModelName = suggested;
+          if (attempt < maxRetries - 1) continue;
+        }
+      }
+      resolvedModelName = null;
+      if (attempt < maxRetries - 1) {
+        await sleep(backoffMs);
+        const info2 = await resolveGeminiModel(apiKey);
+        modelId = info2.id;
+        continue;
+      }
+      throw new Error(`Gemini 404: ${txt}`);
+    }
+
+    if (response.status === 400) {
+      const bodyText = await response.text();
+      if (bodyText.toLowerCase().includes("unexpected model name format") || bodyText.toLowerCase().includes("invalid_argument")) {
+        if (rawName && rawName !== modelId && !MODEL_BLACKLIST.has(rawName)) {
+          const rawUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(rawName)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+          const rawResp = await fetch(rawUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody),
+          });
+          if (rawResp.ok) return rawResp.json();
+          if (rawResp.status === 404) resolvedModelName = null;
+          const rawTxt = await rawResp.text();
+          if (attempt < maxRetries - 1) {
+            await sleep(backoffMs);
+            const info2 = await resolveGeminiModel(apiKey);
+            modelId = info2.id;
+            continue;
+          }
+          throw new Error(`Gemini model-format fallback failed: ${rawResp.status} ${rawTxt}`);
+        }
+      }
+      throw new Error(`Gemini API (400): ${bodyText}`);
     }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gemini API Error (${response.status}): ${errorText.slice(0, 180)}`);
+      const errText = await response.text();
+      throw new Error(`Gemini API Error (${response.status}): ${errText.slice(0, 180)}`);
     }
 
-    // success
     return response.json();
   }
 
