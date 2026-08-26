@@ -133,18 +133,26 @@ function strings(value: unknown): string[] {
 function normalizeAnalysis(value: unknown, input: AnalysisInput, match: ProductMatch | null): Analysis {
   const parsed = value && typeof value === "object" ? (value as Partial<Analysis>) : {};
   const grades = ["A", "B", "C", "D", "E", "F"] as const;
-  const grade = grades.includes(parsed.grade as (typeof grades)[number]) ? parsed.grade as Analysis["grade"] : "C";
+  const grade = grades.includes(parsed.grade as (typeof grades)[number]) ? (parsed.grade as Analysis["grade"]) : "C";
   const confidence = ["low", "medium", "high"].includes(parsed.confidence ?? "")
-    ? parsed.confidence as Analysis["confidence"]
-    : match ? "medium" : "low";
+    ? (parsed.confidence as Analysis["confidence"])
+    : match
+      ? "medium"
+      : "low";
   return {
-    foodName: typeof parsed.foodName === "string" && parsed.foodName.trim() ? parsed.foodName : match?.product.product_name ?? input.name ?? "Unknown food",
+    foodName:
+      typeof parsed.foodName === "string" && parsed.foodName.trim()
+        ? parsed.foodName
+        : match?.product.product_name ?? input.name ?? "Unknown food",
     brand: typeof parsed.brand === "string" ? parsed.brand : match?.product.brands ?? null,
     barcode: input.barcode?.replace(/\D/g, "") || null,
     grade,
     score: Math.max(0, Math.min(100, Math.round(Number(parsed.score) || 50))),
     verdict: typeof parsed.verdict === "string" ? parsed.verdict : "There is not enough evidence for a precise verdict.",
-    explanation: typeof parsed.explanation === "string" ? parsed.explanation : "Product details were limited, so this assessment is an estimate. Photograph the ingredients and nutrition label for a more accurate result.",
+    explanation:
+      typeof parsed.explanation === "string"
+        ? parsed.explanation
+        : "Product details were limited, so this assessment is an estimate. Photograph the ingredients and nutrition label for a more accurate result.",
     ingredients: Array.isArray(parsed.ingredients) ? parsed.ingredients.slice(0, 12) : [],
     nutrition: Array.isArray(parsed.nutrition) ? parsed.nutrition.slice(0, 12) : [],
     goodPoints: strings(parsed.goodPoints).slice(0, 8),
@@ -173,33 +181,63 @@ record completeness: ${product?.completeness ?? "not available"}`
       ? `Barcode ${data.barcode.replace(/\D/g, "")} was not found in either product database. Do not guess its identity. Use only a supplied name or visible label; otherwise identify it as an unknown product and set confidence low.`
       : "";
 
-  const userContent: Array<Record<string, unknown>> = [{
-    type: "text",
-    text: [
-      data.name ? `User-provided food name: ${data.name}` : "",
-      evidence,
-      data.imageBase64 ? "A current package/ingredients/nutrition photo is attached. Read visible text carefully and prefer it over conflicting database data." : "",
-      "Analyse the evidence and return the required JSON.",
-    ].filter(Boolean).join("\n\n"),
-  }];
-  if (data.imageBase64) userContent.push({ type: "image_url", image_url: { url: data.imageBase64 } });
+  const promptText = [
+    data.name ? `User-provided food name: ${data.name}` : "",
+    evidence,
+    data.imageBase64 ? "A current package/ingredients/nutrition photo is attached. Read visible text carefully and prefer it over conflicting database data." : "",
+    "Analyse the evidence and return the required JSON.",
+  ].filter(Boolean).join("\n\n");
 
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "openai/gpt-5.6-sol",
-      reasoning_effort: "none",
-      response_format: { type: "json_object" },
-      messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: userContent }],
-    }),
-  });
+  const parts: Array<{ text?: string; inline_data?: { mime_type: string; data: string } }> = [
+    { text: promptText }
+  ];
+
+  if (data.imageBase64) {
+    const mimeMatch = data.imageBase64.match(/^data:(image\/[a-zA-Z+]+);base64,/);
+    const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+    const base64Data = data.imageBase64.includes(",")
+      ? data.imageBase64.split(",")[1]
+      : data.imageBase64;
+
+    parts.push({
+      inline_data: {
+        mime_type: mimeType,
+        data: base64Data,
+      },
+    });
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: {
+          parts: [{ text: SYSTEM_PROMPT }],
+        },
+        contents: [
+          {
+            parts,
+          },
+        ],
+        generationConfig: {
+          response_mime_type: "application/json",
+        },
+      }),
+    }
+  );
+
   if (!response.ok) {
     if (response.status === 429) throw new Error("Too many scans right now — please try again shortly.");
-    if (response.status === 402) throw new Error("AI credits are exhausted for this app. Please add credits.");
-    console.error("Food analysis provider error", response.status, (await response.text()).slice(0, 500));
+    console.error("Gemini API error", response.status, (await response.text()).slice(0, 500));
     throw new Error("The food analysis service is temporarily unavailable.");
   }
-  const json = (await response.json()) as { choices?: { message?: { content?: string } }[] };
-  return normalizeAnalysis(extractJson(json.choices?.[0]?.message?.content ?? ""), data, match);
+
+  const json = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+
+  const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  return normalizeAnalysis(extractJson(rawText), data, match);
 }
