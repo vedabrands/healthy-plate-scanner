@@ -163,7 +163,7 @@ export function FoodScanner() {
       }
     } else {
       if (height > MAX_DIM) {
-        width = Math.round((width * MAX_HEIGHT) / height);
+        width = Math.round((width * MAX_DIM) / height);
         height = MAX_DIM;
       }
     }
