@@ -1,7 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Camera, Image as ImageIcon, ImageUp, Keyboard, Loader2, ScanLine, Search, X } from "lucide-react";
+import {
+  Camera,
+  Check,
+  Flashlight,
+  FlashlightOff,
+  FlipHorizontal,
+  Image as ImageIcon,
+  ImageUp,
+  Keyboard,
+  Loader2,
+  RefreshCw,
+  ScanLine,
+  Search,
+  X,
+} from "lucide-react";
 import { analyzeFood, type Analysis } from "@/lib/analyze.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -46,7 +60,7 @@ async function compressImageFile(file: File): Promise<string> {
         canvas.height = height;
         const ctx = canvas.getContext("2d");
         ctx?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", 0.75));
+        resolve(canvas.toDataURL("image/jpeg", 0.8));
       };
       img.onerror = reject;
       img.src = e.target?.result as string;
@@ -63,11 +77,14 @@ export function FoodScanner() {
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Analysis | null>(null);
-  
-  // Live Camera States
+
+  // Live Camera Controls State
   const [liveCameraActive, setLiveCameraActive] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
-  
+  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
+  const [torchEnabled, setTorchEnabled] = useState(false);
+  const [hasTorchCapability, setHasTorchCapability] = useState(false);
+
   const photoVideoRef = useRef<HTMLVideoElement | null>(null);
   const barcodeVideoRef = useRef<HTMLVideoElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
@@ -79,16 +96,60 @@ export function FoodScanner() {
 
   const stopAllCameras = () => {
     if (cameraStream) {
-      cameraStream.getTracks().forEach((t) => t.stop());
+      cameraStream.getTracks().forEach((t) => {
+        try {
+          if (t.kind === "video" && "applyConstraints" in t) {
+            void (t as MediaStreamTrack).applyConstraints({
+              // @ts-expect-error advanced torch constraint
+              advanced: [{ torch: false }],
+            });
+          }
+        } catch {
+          // ignore cleanup errors
+        }
+        t.stop();
+      });
       setCameraStream(null);
     }
     scannerControlsRef.current?.stop();
     scannerControlsRef.current = null;
     scanLockedRef.current = false;
     setLiveCameraActive(false);
+    setTorchEnabled(false);
+    setHasTorchCapability(false);
   };
 
   useEffect(() => () => stopAllCameras(), []);
+
+  const toggleTorch = async () => {
+    if (!cameraStream) return;
+    const track = cameraStream.getVideoTracks()[0];
+    if (!track) return;
+
+    try {
+      const nextState = !torchEnabled;
+      // @ts-expect-error advanced torch constraint
+      await track.applyConstraints({
+        advanced: [{ torch: nextState }],
+      });
+      setTorchEnabled(nextState);
+    } catch {
+      toast.error("Flash is not supported on this device/camera.");
+    }
+  };
+
+  const flipCamera = async () => {
+    const nextMode = facingMode === "environment" ? "user" : "environment";
+    setFacingMode(nextMode);
+    if (liveCameraActive) {
+      stopAllCameras();
+      if (mode === "photo") {
+        await startPhotoCamera(nextMode);
+      } else if (mode === "camera") {
+        await startBarcodeCamera(nextMode);
+      }
+    }
+  };
 
   const run = async (payload: { name?: string; barcode?: string; imageBase64?: string }) => {
     setLoading(true);
@@ -121,40 +182,59 @@ export function FoodScanner() {
     try {
       const compressed = await compressImageFile(file);
       setPreview(compressed);
-      await run({ imageBase64: compressed, name: text.trim() || undefined });
+      setResult(null);
     } catch {
       toast.error("Failed to read image file.");
     }
   };
 
   // Live Camera for Photo Mode
-  const startPhotoCamera = async () => {
+  const startPhotoCamera = async (facing: "environment" | "user" = facingMode) => {
     stopAllCameras();
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera unavailable");
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        video: {
+          facingMode: { ideal: facing },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
         audio: false,
       });
+
       setCameraStream(stream);
       setLiveCameraActive(true);
+
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        // @ts-expect-error getCapabilities support
+        const capabilities = videoTrack.getCapabilities?.();
+        if (capabilities && "torch" in capabilities) {
+          setHasTorchCapability(true);
+        }
+      }
+
       if (photoVideoRef.current) {
         photoVideoRef.current.srcObject = stream;
         await photoVideoRef.current.play();
       }
     } catch {
       stopAllCameras();
-      toast.error("Couldn't open camera. Please grant camera permissions.");
+      toast.error("Couldn't open camera. Please check camera permissions.");
     }
   };
 
   const snapPhotoFromStream = () => {
     const video = photoVideoRef.current;
-    if (!video) return;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      toast.error("Camera is initializing. Please wait a moment and tap again.");
+      return;
+    }
+
     const canvas = document.createElement("canvas");
     const MAX_DIM = 1024;
-    let width = video.videoWidth || 640;
-    let height = video.videoHeight || 480;
+    let width = video.videoWidth;
+    let height = video.videoHeight;
 
     if (width > height) {
       if (width > MAX_DIM) {
@@ -171,28 +251,33 @@ export function FoodScanner() {
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
-    ctx?.drawImage(video, 0, 0, width, height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+    if (!ctx) return;
+
+    ctx.drawImage(video, 0, 0, width, height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
 
     stopAllCameras();
     setPreview(dataUrl);
-    void run({ imageBase64: dataUrl, name: text.trim() || undefined });
+    setResult(null);
   };
 
   // Barcode Scanner Camera
-  const startBarcodeCamera = async () => {
+  const startBarcodeCamera = async (facing: "environment" | "user" = facingMode) => {
     stopAllCameras();
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera unavailable");
       setLiveCameraActive(true);
       scanLockedRef.current = false;
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
       const video = barcodeVideoRef.current;
       if (!video) throw new Error("Camera preview unavailable");
+
       const [{ BrowserMultiFormatReader }, { BarcodeFormat, DecodeHintType }] = await Promise.all([
         import("@zxing/browser"),
         import("@zxing/library"),
       ]);
+
       const formats = [
         BarcodeFormat.EAN_13,
         BarcodeFormat.EAN_8,
@@ -204,12 +289,20 @@ export function FoodScanner() {
         BarcodeFormat.DATA_MATRIX,
         BarcodeFormat.QR_CODE,
       ];
+
       const hints = new Map();
       hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
       hints.set(DecodeHintType.TRY_HARDER, true);
+
       const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 180 });
       const controls = await reader.decodeFromConstraints(
-        { video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } },
+        {
+          video: {
+            facingMode: { ideal: facing },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+        },
         video,
         (scanResult) => {
           const code = scanResult?.getText().replace(/\D/g, "");
@@ -221,8 +314,9 @@ export function FoodScanner() {
           setBarcode(code);
           toast.success(`Barcode ${code} detected`);
           void run({ barcode: code });
-        },
+        }
       );
+
       scannerControlsRef.current = controls;
     } catch {
       stopAllCameras();
@@ -242,6 +336,7 @@ export function FoodScanner() {
               onClick={() => {
                 stopAllCameras();
                 setMode(m.id);
+                setPreview(null);
               }}
               className={cn("rounded-full border", mode === m.id && "border-primary")}
             >
@@ -261,14 +356,87 @@ export function FoodScanner() {
                     autoPlay
                     playsInline
                     muted
-                    className="max-h-80 w-full object-contain"
+                    className="max-h-96 w-full object-contain"
                   />
-                  <div className="absolute inset-x-0 bottom-0 flex justify-center gap-3 p-4 bg-gradient-to-t from-black/70 to-transparent">
-                    <Button type="button" onClick={snapPhotoFromStream} className="rounded-xl px-5">
+
+                  {/* Top Floating Camera Controls (Flash & Flip) */}
+                  <div className="absolute inset-x-0 top-3 flex items-center justify-between px-4">
+                    {hasTorchCapability ? (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="secondary"
+                        onClick={toggleTorch}
+                        className="rounded-full bg-black/60 text-white backdrop-blur-md hover:bg-black/80"
+                      >
+                        {torchEnabled ? (
+                          <Flashlight className="size-5 text-amber-400" />
+                        ) : (
+                          <FlashlightOff className="size-5" />
+                        )}
+                      </Button>
+                    ) : (
+                      <div />
+                    )}
+
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="secondary"
+                      onClick={flipCamera}
+                      className="rounded-full bg-black/60 text-white backdrop-blur-md hover:bg-black/80"
+                    >
+                      <FlipHorizontal className="size-5" />
+                    </Button>
+                  </div>
+
+                  {/* Bottom Action Bar */}
+                  <div className="absolute inset-x-0 bottom-0 flex justify-center gap-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4">
+                    <Button
+                      type="button"
+                      onClick={snapPhotoFromStream}
+                      className="rounded-xl px-6 py-2.5 font-medium shadow-lg"
+                    >
                       <Camera className="mr-2 size-4" /> Capture Photo
                     </Button>
-                    <Button type="button" variant="secondary" onClick={stopAllCameras} className="rounded-xl">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={stopAllCameras}
+                      className="rounded-xl"
+                    >
                       <X className="size-4" /> Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : preview ? (
+                /* Post-Capture Review State with Retake and Upload/Grade */
+                <div className="space-y-4 rounded-2xl border bg-secondary/30 p-4 text-center">
+                  <img
+                    src={preview}
+                    alt="Captured label"
+                    className="mx-auto max-h-72 rounded-xl border object-contain shadow-sm"
+                  />
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setPreview(null);
+                        void startPhotoCamera();
+                      }}
+                      className="rounded-xl"
+                      disabled={loading}
+                    >
+                      <RefreshCw className="mr-2 size-4" /> Retake Photo
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => void run({ imageBase64: preview, name: text.trim() || undefined })}
+                      className="rounded-xl px-6"
+                      disabled={loading}
+                    >
+                      <Check className="mr-2 size-4" /> Grade this Label
                     </Button>
                   </div>
                 </div>
@@ -277,7 +445,9 @@ export function FoodScanner() {
                   <ImageUp className="size-8 text-primary" />
                   <div>
                     <p className="font-medium text-foreground">Upload or capture food label</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Ingredients and nutrition panel work best</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Ingredients and nutrition panel work best
+                    </p>
                   </div>
 
                   <input
@@ -294,7 +464,7 @@ export function FoodScanner() {
                   <div className="flex flex-wrap items-center justify-center gap-3">
                     <Button
                       type="button"
-                      onClick={startPhotoCamera}
+                      onClick={() => void startPhotoCamera()}
                       className="inline-flex items-center gap-2 rounded-xl"
                     >
                       <Camera className="size-4" />
@@ -313,14 +483,6 @@ export function FoodScanner() {
                   </div>
                 </div>
               )}
-
-              {preview && !liveCameraActive && (
-                <img
-                  src={preview}
-                  alt="Scanned food package"
-                  className="mx-auto max-h-56 rounded-2xl border object-contain shadow-sm"
-                />
-              )}
             </div>
           )}
 
@@ -328,7 +490,26 @@ export function FoodScanner() {
             <div className="space-y-3">
               {liveCameraActive ? (
                 <div className="relative overflow-hidden rounded-2xl border bg-foreground/90">
-                  <video ref={barcodeVideoRef} playsInline muted className="max-h-80 w-full object-contain" />
+                  <video
+                    ref={barcodeVideoRef}
+                    playsInline
+                    muted
+                    className="max-h-80 w-full object-contain"
+                  />
+
+                  {/* Flip Camera on Barcode Mode */}
+                  <div className="absolute right-3 top-3">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="secondary"
+                      onClick={flipCamera}
+                      className="rounded-full bg-black/60 text-white backdrop-blur-md hover:bg-black/80"
+                    >
+                      <FlipHorizontal className="size-5" />
+                    </Button>
+                  </div>
+
                   <div className="pointer-events-none absolute inset-x-10 top-1/2 h-24 -translate-y-1/2 rounded-xl border-2 border-accent" />
                   <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
                     <span className="inline-flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
@@ -347,7 +528,7 @@ export function FoodScanner() {
                   <p className="mb-4 text-sm text-muted-foreground">
                     We detect the code automatically and pull the product details.
                   </p>
-                  <Button type="button" onClick={startBarcodeCamera}>
+                  <Button type="button" onClick={() => void startBarcodeCamera()}>
                     <Camera className="size-4" /> Open camera
                   </Button>
                 </div>
