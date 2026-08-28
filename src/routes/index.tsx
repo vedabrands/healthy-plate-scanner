@@ -1,120 +1,185 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { 
+  ShieldCheck, 
+  Sparkles, 
+  Search, 
+  Camera, 
+  BarChart3, 
+  Apple, 
+  HeartPulse, 
+  Flame, 
+  CheckCircle2, 
+  ArrowRight 
+} from "lucide-react";
+import { InteractiveFoodBackground } from "@/components/InteractiveFoodBackground";
 import { FoodScanner } from "@/components/FoodScanner";
-import { GradeBadge } from "@/components/GradeBadge";
-import { SiteHeader } from "@/components/SiteHeader";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "NutriGrade — Scan food, get an A–F health grade" },
-      {
-        name: "description",
-        content:
-          "Scan a barcode, snap the pack, or type a food name and get an instant A–F health grade, what's harmful inside it, and better alternatives.",
-      },
-      { property: "og:title", content: "NutriGrade — Scan food, get an A–F health grade" },
-      {
-        property: "og:description",
-        content:
-          "Instant A–F grading for any packaged food, with a plain-language breakdown of what's inside and healthier swaps.",
-      },
-    ],
-  }),
-  component: Index,
+  component: HomePage,
 });
 
-const gradeDetails: Record<
-  string,
-  { title: string; desc: string; badgeClass: string }
-> = {
-  A: {
-    title: "Grade A — Excellent",
-    desc: "Whole, unprocessed or minimally processed foods rich in fiber, micronutrients, and healthy proteins.",
-    badgeClass: "bg-emerald-600 text-white",
-  },
-  B: {
-    title: "Grade B — Good",
-    desc: "Nutrient-dense with balanced macros, minimal refined sugars, and low synthetic additives.",
-    badgeClass: "bg-lime-600 text-white",
-  },
-  C: {
-    title: "Grade C — Moderate",
-    desc: "Contains moderate levels of sodium, saturated fats, or added sugars. Suitable in moderation.",
-    badgeClass: "bg-amber-500 text-white",
-  },
-  D: {
-    title: "Grade D — Poor",
-    desc: "High in ultra-processed ingredients, elevated sugar, or saturated fats. Limit regular intake.",
-    badgeClass: "bg-orange-500 text-white",
-  },
-  E: {
-    title: "Grade E — Very Poor",
-    desc: "Heavy in refined oils, artificial preservatives, high sodium, and empty calories.",
-    badgeClass: "bg-rose-600 text-white",
-  },
-  F: {
-    title: "Grade F — Ultra-Processed Hazard",
-    desc: "Extremely high in harmful additives, trans fats, or excessive chemical sweeteners.",
-    badgeClass: "bg-red-700 text-white",
-  },
-};
+const GRADES = [
+  { grade: "A", color: "bg-emerald-500", text: "text-emerald-500", label: "Excellent", desc: "Whole foods, minimally processed, rich in nutrients." },
+  { grade: "B", color: "bg-teal-500", text: "text-teal-500", label: "Good", desc: "Decent nutritional profile with minor processing." },
+  { grade: "C", color: "bg-amber-500", text: "text-amber-500", label: "Moderate", desc: "Average quality. Best consumed in moderation." },
+  { grade: "D", color: "bg-orange-500", text: "text-orange-500", label: "Poor", desc: "High in sodium, sugars, or refined saturated fats." },
+  { grade: "E", color: "bg-rose-500", text: "text-rose-500", label: "Ultra-Processed", desc: "Heavy additives, low nutritional density." },
+  { grade: "F", color: "bg-red-600", text: "text-red-600", label: "Harmful", desc: "Hazardous additive profiles and high health risks." },
+];
 
-function Index() {
+const FEATURES = [
+  {
+    icon: Camera,
+    title: "Instant OCR & Barcode Scan",
+    description: "Scan product barcodes or snap packaging nutrition labels with real-time text parsing.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Verified Ingredient Database",
+    description: "Cross-checked against Open Food Facts and global food registries for uncompromised accuracy.",
+  },
+  {
+    icon: BarChart3,
+    title: "NOVA & Additive Breakdown",
+    description: "Reveals hidden emulsifiers, excessive sodium, trans fats, and processing levels in plain language.",
+  },
+  {
+    icon: Sparkles,
+    title: "Smarter Alternatives",
+    description: "Suggests cleaner, whole-food swaps whenever a scan receives a poor or average grade.",
+  },
+];
+
+const STEPS = [
+  {
+    step: "01",
+    title: "Scan or Snap",
+    desc: "Use your camera to scan a barcode, snap the ingredients panel, or type any food name.",
+  },
+  {
+    step: "02",
+    title: "Evidence Analysis",
+    desc: "Our engine evaluates the ingredient hierarchy, NOVA processing tier, and nutrient density.",
+  },
+  {
+    step: "03",
+    title: "Understand Your Food",
+    desc: "Receive an instant A–F score, clear health implications, and better nutritional alternatives.",
+  },
+];
+
+function HomePage() {
   return (
-    <div className="min-h-screen">
-      <SiteHeader />
-      <main className="mx-auto max-w-3xl px-4 pb-20 pt-10">
-        <section className="grain rounded-3xl border bg-card px-6 py-10 text-center shadow-soft">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-            Know what you eat
-          </p>
-          <h1 className="mt-3 text-4xl leading-tight sm:text-5xl">
-            Scan any food. Get a grade from A to F.
+    <div className="relative min-h-screen overflow-x-hidden bg-background text-foreground selection:bg-primary/20">
+      {/* Floating Interactive Food Elements */}
+      <InteractiveFoodBackground />
+
+      <main className="relative z-10 mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
+        {/* Hero Section */}
+        <section className="mb-10 text-center sm:mb-14">
+          <div className="inline-flex items-center gap-2 rounded-full border bg-card/80 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary shadow-sm backdrop-blur-sm">
+            <HeartPulse className="size-3.5" />
+            <span>Know What You Eat</span>
+          </div>
+
+          <h1 className="mt-4 font-serif text-4xl font-extrabold tracking-tight sm:text-5xl md:text-6xl">
+            Scan any food. Get a grade from{" "}
+            <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-primary bg-clip-text text-transparent">
+              A to F
+            </span>
+            .
           </h1>
-          <p className="mx-auto mt-4 max-w-xl text-base text-muted-foreground">
-            Scan the barcode with your camera, photograph the label, type the barcode, or just search
-            the name. You'll see exactly what's inside, what harms your health and why, and what to
-            eat instead.
+
+          <p className="mx-auto mt-4 max-w-2xl text-base text-muted-foreground sm:text-lg">
+            Instant, evidence-backed nutritional ratings. Decode complex labels, spot harmful additives, and find healthier everyday alternatives.
           </p>
+        </section>
 
-          {/* Interactive Animated Grade Badges */}
-          <div className="mt-6 flex flex-wrap justify-center gap-2.5 text-sm">
-            {(["A", "B", "C", "D", "E", "F"] as const).map((g) => {
-              const info = gradeDetails[g];
-              return (
-                <div key={g} className="group relative flex items-center justify-center">
-                  <div className="transition-transform duration-200 ease-out group-hover:scale-110">
-                    <GradeBadge grade={g} size="sm" className="cursor-pointer rounded-xl shadow-xs" />
-                  </div>
+        {/* Primary Interactive Food Scanner Tool */}
+        <section aria-label="Food Scanner" className="w-full">
+          <FoodScanner />
+        </section>
 
-                  {/* Smooth Hover Popup Card */}
-                  <div className="pointer-events-none absolute bottom-full mb-3 left-1/2 w-64 -translate-x-1/2 opacity-0 scale-95 translate-y-2 transition-all duration-200 ease-out group-hover:pointer-events-auto group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 z-50">
-                    <div className="rounded-2xl border border-border/80 bg-background/95 p-3.5 shadow-xl backdrop-blur-md">
-                      <div className="flex items-center gap-2 pb-1.5 border-b border-border/50">
-                        <span
-                          className={`flex size-5 items-center justify-center rounded-full text-[11px] font-bold ${info.badgeClass}`}
-                        >
-                          {g}
-                        </span>
-                        <p className="text-xs font-semibold text-foreground">{info.title}</p>
-                      </div>
-                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground text-left">
-                        {info.desc}
-                      </p>
-                    </div>
+        {/* How It Works */}
+        <section className="mt-20 sm:mt-28">
+          <div className="mb-10 text-center">
+            <h2 className="font-serif text-2xl font-bold tracking-tight sm:text-3xl">How NutriGrade Works</h2>
+            <p className="mt-2 text-sm text-muted-foreground sm:text-base">
+              Transparent, science-backed food evaluation in three easy steps.
+            </p>
+          </div>
 
-                    {/* Arrow Indicator */}
-                    <div className="mx-auto -mt-1 size-2 rotate-45 border-b border-r border-border/80 bg-background" />
-                  </div>
-                </div>
-              );
-            })}
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+            {STEPS.map((s) => (
+              <div
+                key={s.step}
+                className="relative rounded-3xl border bg-card/60 p-6 shadow-soft backdrop-blur-sm transition-all hover:border-primary/40 hover:shadow-md"
+              >
+                <span className="text-3xl font-black text-primary/20">{s.step}</span>
+                <h3 className="mt-2 text-lg font-semibold text-foreground">{s.title}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{s.desc}</p>
+              </div>
+            ))}
           </div>
         </section>
 
-        <div className="mt-8">
-          <FoodScanner />
-        </div>
+        {/* Grading Scale Guide */}
+        <section className="mt-20 sm:mt-28">
+          <div className="mb-10 text-center">
+            <h2 className="font-serif text-2xl font-bold tracking-tight sm:text-3xl">The Grading System</h2>
+            <p className="mt-2 text-sm text-muted-foreground sm:text-base">
+              Clear benchmarks based on whole ingredients, additive safety, and processing depth.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {GRADES.map((g) => (
+              <div
+                key={g.grade}
+                className="flex flex-col items-center rounded-2xl border bg-card/70 p-4 text-center shadow-soft backdrop-blur-sm"
+              >
+                <div className={`flex size-11 items-center justify-center rounded-xl text-xl font-bold text-white shadow-sm ${g.color}`}>
+                  {g.grade}
+                </div>
+                <span className={`mt-2.5 text-sm font-semibold ${g.text}`}>{g.label}</span>
+                <p className="mt-1 text-xs text-muted-foreground leading-tight">{g.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Feature Highlights */}
+        <section className="mt-20 sm:mt-28">
+          <div className="mb-10 text-center">
+            <h2 className="font-serif text-2xl font-bold tracking-tight sm:text-3xl">Why Trust NutriGrade?</h2>
+            <p className="mt-2 text-sm text-muted-foreground sm:text-base">
+              Built to cut through misleading marketing claims on package fronts.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+            {FEATURES.map((f) => (
+              <div
+                key={f.title}
+                className="flex gap-4 rounded-3xl border bg-card/60 p-6 shadow-soft backdrop-blur-sm"
+              >
+                <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <f.icon className="size-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-foreground">{f.title}</h3>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{f.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Footer CTA */}
+        <footer className="mt-24 border-t pt-8 pb-12 text-center text-xs text-muted-foreground">
+          <p>© {new Date().getFullYear()} NutriGrade. Evidence-based health metrics for smart choices.</p>
+        </footer>
       </main>
     </div>
   );
