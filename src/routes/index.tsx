@@ -1,19 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { 
   ShieldCheck, 
   Sparkles, 
-  Search, 
   Camera, 
   BarChart3, 
-  Apple, 
   HeartPulse, 
-  Flame, 
-  CheckCircle2, 
-  ArrowRight 
 } from "lucide-react";
 import { InteractiveFoodBackground } from "@/components/InteractiveFoodBackground";
 import { FoodScanner } from "@/components/FoodScanner";
-import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({
   component: HomePage,
@@ -72,13 +66,32 @@ const STEPS = [
 function HomePage() {
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-background text-foreground selection:bg-primary/20">
-      {/* Floating Interactive Food Elements */}
+      {/* Embedded 3D Bulge & Lift Animation Styles */}
+      <style>{`
+        .card-3d-bulge {
+          transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), 
+                      box-shadow 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+                      border-color 0.25s ease;
+          will-change: transform, box-shadow;
+        }
+        .card-3d-bulge:hover {
+          transform: translateY(-8px) scale(1.035);
+          box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.16), 
+                      0 10px 15px -5px rgba(0, 0, 0, 0.08);
+        }
+        .card-3d-bulge:active {
+          transform: translateY(-2px) scale(0.99);
+          box-shadow: 0 8px 15px -5px rgba(0, 0, 0, 0.12);
+        }
+      `}</style>
+
+      {/* Floating Interactive Background */}
       <InteractiveFoodBackground />
 
       <main className="relative z-10 mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
         {/* Hero Section */}
         <section className="mb-10 text-center sm:mb-14">
-          <div className="inline-flex items-center gap-2 rounded-full border bg-card/80 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary shadow-sm backdrop-blur-sm">
+          <div className="inline-flex items-center gap-2 rounded-full border bg-card/90 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary shadow-sm backdrop-blur-md transition-transform hover:scale-105 cursor-default">
             <HeartPulse className="size-3.5" />
             <span>Know What You Eat</span>
           </div>
@@ -96,9 +109,11 @@ function HomePage() {
           </p>
         </section>
 
-        {/* Primary Interactive Food Scanner Tool */}
+        {/* Primary Interactive Food Scanner */}
         <section aria-label="Food Scanner" className="w-full">
-          <FoodScanner />
+          <div className="card-3d-bulge rounded-3xl">
+            <FoodScanner />
+          </div>
         </section>
 
         {/* How It Works */}
@@ -114,9 +129,9 @@ function HomePage() {
             {STEPS.map((s) => (
               <div
                 key={s.step}
-                className="relative rounded-3xl border bg-card/60 p-6 shadow-soft backdrop-blur-sm transition-all hover:border-primary/40 hover:shadow-md"
+                className="card-3d-bulge relative rounded-3xl border bg-card/85 p-6 shadow-sm backdrop-blur-md cursor-pointer"
               >
-                <span className="text-3xl font-black text-primary/20">{s.step}</span>
+                <span className="text-3xl font-black text-primary/30">{s.step}</span>
                 <h3 className="mt-2 text-lg font-semibold text-foreground">{s.title}</h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{s.desc}</p>
               </div>
@@ -133,11 +148,11 @@ function HomePage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-6">
             {GRADES.map((g) => (
               <div
                 key={g.grade}
-                className="flex flex-col items-center rounded-2xl border bg-card/70 p-4 text-center shadow-soft backdrop-blur-sm"
+                className="card-3d-bulge flex flex-col items-center rounded-2xl border bg-card/85 p-4 text-center shadow-sm backdrop-blur-md cursor-pointer"
               >
                 <div className={`flex size-11 items-center justify-center rounded-xl text-xl font-bold text-white shadow-sm ${g.color}`}>
                   {g.grade}
@@ -162,7 +177,7 @@ function HomePage() {
             {FEATURES.map((f) => (
               <div
                 key={f.title}
-                className="flex gap-4 rounded-3xl border bg-card/60 p-6 shadow-soft backdrop-blur-sm"
+                className="card-3d-bulge flex gap-4 rounded-3xl border bg-card/85 p-6 shadow-sm backdrop-blur-md cursor-pointer"
               >
                 <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
                   <f.icon className="size-6" />
