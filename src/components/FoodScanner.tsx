@@ -214,10 +214,16 @@ export function FoodScanner() {
         }
       }
 
-      if (photoVideoRef.current) {
-        photoVideoRef.current.srcObject = stream;
-        await photoVideoRef.current.play();
-      }
+      setTimeout(async () => {
+        if (photoVideoRef.current) {
+          photoVideoRef.current.srcObject = stream;
+          try {
+            await photoVideoRef.current.play();
+          } catch (playErr) {
+            console.warn("Autoplay prevented:", playErr);
+          }
+        }
+      }, 50);
     } catch {
       stopAllCameras();
       toast.error("Couldn't open camera. Please check camera permissions.");
@@ -226,15 +232,19 @@ export function FoodScanner() {
 
   const snapPhotoFromStream = () => {
     const video = photoVideoRef.current;
-    if (!video || !video.videoWidth || !video.videoHeight) {
-      toast.error("Camera is initializing. Please wait a moment and tap again.");
+    const track = cameraStream?.getVideoTracks()[0];
+    const settings = track?.getSettings();
+
+    let width = video?.videoWidth || settings?.width || 1280;
+    let height = video?.videoHeight || settings?.height || 720;
+
+    if (!video) {
+      toast.error("Camera preview unavailable.");
       return;
     }
 
     const canvas = document.createElement("canvas");
     const MAX_DIM = 1024;
-    let width = video.videoWidth;
-    let height = video.videoHeight;
 
     if (width > height) {
       if (width > MAX_DIM) {
@@ -253,12 +263,16 @@ export function FoodScanner() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    ctx.drawImage(video, 0, 0, width, height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    try {
+      ctx.drawImage(video, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
 
-    stopAllCameras();
-    setPreview(dataUrl);
-    setResult(null);
+      stopAllCameras();
+      setPreview(dataUrl);
+      setResult(null);
+    } catch {
+      toast.error("Failed to capture frame. Please try again.");
+    }
   };
 
   // Barcode Scanner Camera
@@ -359,7 +373,7 @@ export function FoodScanner() {
                     className="max-h-96 w-full object-contain"
                   />
 
-                  {/* Top Floating Camera Controls (Flash & Flip) */}
+                  {/* Flash & Flip Controls */}
                   <div className="absolute inset-x-0 top-3 flex items-center justify-between px-4">
                     {hasTorchCapability ? (
                       <Button
@@ -410,7 +424,6 @@ export function FoodScanner() {
                   </div>
                 </div>
               ) : preview ? (
-                /* Post-Capture Review State with Retake and Upload/Grade */
                 <div className="space-y-4 rounded-2xl border bg-secondary/30 p-4 text-center">
                   <img
                     src={preview}
@@ -497,7 +510,6 @@ export function FoodScanner() {
                     className="max-h-80 w-full object-contain"
                   />
 
-                  {/* Flip Camera on Barcode Mode */}
                   <div className="absolute right-3 top-3">
                     <Button
                       type="button"
