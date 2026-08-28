@@ -22,23 +22,25 @@ const HEALTHY_FOODS = [
   { emoji: "🍌", name: "Banana" },
   { emoji: "🫐", name: "Blueberries" },
   { emoji: "🍊", name: "Orange" },
+  { emoji: "🍇", name: "Grapes" },
+  { emoji: "🥗", name: "Salad" },
 ];
 
-// Web Audio API Synthesized Sound Effects (No external mp3 assets needed)
 class SoundEffects {
   private ctx: AudioContext | null = null;
 
   private init() {
     if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      this.ctx = new AudioCtx();
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx) this.ctx = new AudioCtx();
     }
-    if (this.ctx.state === "suspended") {
+    if (this.ctx && this.ctx.state === "suspended") {
       void this.ctx.resume();
     }
   }
 
-  // Crunch / Munch sound effect
   playMunch() {
     try {
       this.init();
@@ -48,10 +50,10 @@ class SoundEffects {
       const gain = this.ctx.createGain();
 
       osc.type = "triangle";
-      osc.frequency.setValueAtTime(160 + Math.random() * 80, this.ctx.currentTime);
+      osc.frequency.setValueAtTime(190 + Math.random() * 80, this.ctx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.12);
 
-      gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+      gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
 
       osc.connect(gain);
@@ -60,11 +62,10 @@ class SoundEffects {
       osc.start();
       osc.stop(this.ctx.currentTime + 0.13);
     } catch {
-      // Ignore audio policy issues
+      // audio fallback
     }
   }
 
-  // Play comical burp sound
   playBurp() {
     try {
       this.init();
@@ -74,13 +75,13 @@ class SoundEffects {
       const gain = this.ctx.createGain();
 
       osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(80, this.ctx.currentTime);
-      osc.frequency.linearRampToValueAtTime(55, this.ctx.currentTime + 0.15);
-      osc.frequency.linearRampToValueAtTime(70, this.ctx.currentTime + 0.35);
+      osc.frequency.setValueAtTime(85, this.ctx.currentTime);
+      osc.frequency.linearRampToValueAtTime(50, this.ctx.currentTime + 0.15);
+      osc.frequency.linearRampToValueAtTime(75, this.ctx.currentTime + 0.35);
       osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.55);
 
-      gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.3, this.ctx.currentTime + 0.35);
+      gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.35, this.ctx.currentTime + 0.35);
       gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.6);
 
       osc.connect(gain);
@@ -89,7 +90,7 @@ class SoundEffects {
       osc.start();
       osc.stop(this.ctx.currentTime + 0.6);
     } catch {
-      // Ignore audio policy issues
+      // audio fallback
     }
   }
 }
@@ -105,22 +106,24 @@ export function InteractiveFoodBackground() {
   const soundIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize randomized background healthy items
   useEffect(() => {
     const items: FloatingFood[] = [];
-    const count = 14;
+    const count = 16;
 
     for (let i = 0; i < count; i++) {
       const foodItem = HEALTHY_FOODS[i % HEALTHY_FOODS.length];
+      const col = i % 4;
+      const row = Math.floor(i / 4);
+
       items.push({
         id: i + 1,
         emoji: foodItem.emoji,
         name: foodItem.name,
-        x: Math.random() * 85 + 5, // 5% - 90% horizontal
-        y: Math.random() * 85 + 5, // 5% - 90% vertical
-        size: Math.random() * 12 + 28, // 28px - 40px
+        x: col * 23 + (Math.random() * 8 + 3),
+        y: row * 22 + (Math.random() * 8 + 3),
+        size: Math.random() * 10 + 38, // 38px - 48px high visibility
         rotation: Math.random() * 40 - 20,
-        speed: Math.random() * 4 + 4, // floating float animation speed
+        speed: Math.random() * 3 + 4,
       });
     }
 
@@ -143,30 +146,23 @@ export function InteractiveFoodBackground() {
     setEatingId(id);
     setProgress(0);
 
-    // Initial crunch
     sfx.playMunch();
 
-    // Sound loop during eating
     soundIntervalRef.current = setInterval(() => {
       sfx.playMunch();
-    }, 320);
+    }, 280);
 
-    // Progress indicator tracker (1500ms total)
     const startTime = Date.now();
     progressIntervalRef.current = setInterval(() => {
       const elapsed = Date.now() - startTime;
       const pct = Math.min(100, Math.round((elapsed / 1500) * 100));
       setProgress(pct);
-    }, 50);
+    }, 35);
 
-    // After 1.5 seconds, finish eating
     holdTimerRef.current = setTimeout(() => {
       clearHoldTimers();
-
-      // Burp sound
       sfx.playBurp();
 
-      // Remove eaten food and respawn a fresh one in a new position
       setFoods((prev) =>
         prev.map((item) => {
           if (item.id === id) {
@@ -175,8 +171,8 @@ export function InteractiveFoodBackground() {
               ...item,
               emoji: nextFood.emoji,
               name: nextFood.name,
-              x: Math.random() * 85 + 5,
-              y: Math.random() * 85 + 5,
+              x: Math.random() * 80 + 10,
+              y: Math.random() * 80 + 10,
               rotation: Math.random() * 40 - 20,
             };
           }
@@ -187,7 +183,7 @@ export function InteractiveFoodBackground() {
   };
 
   return (
-    <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden select-none">
+    <div className="pointer-events-none fixed inset-0 z-0 h-screen w-screen overflow-hidden select-none">
       {foods.map((food) => {
         const isBeingEaten = eatingId === food.id;
 
@@ -201,28 +197,31 @@ export function InteractiveFoodBackground() {
             onPointerUp={clearHoldTimers}
             onPointerLeave={clearHoldTimers}
             onPointerCancel={clearHoldTimers}
-            className="pointer-events-auto absolute cursor-pointer transition-transform duration-75 active:scale-95"
+            className="pointer-events-auto absolute cursor-pointer transition-all duration-100 hover:scale-125 active:scale-95"
             style={{
               left: `${food.x}%`,
               top: `${food.y}%`,
-              transform: `rotate(${food.rotation}deg) scale(${isBeingEaten ? Math.max(0.2, 1 - progress / 100) : 1})`,
+              transform: `rotate(${food.rotation}deg) scale(${
+                isBeingEaten ? Math.max(0.2, 1 - progress / 100) : 1
+              })`,
               fontSize: `${food.size}px`,
-              opacity: isBeingEaten ? Math.max(0.2, 1 - progress / 100) : 0.45,
+              opacity: isBeingEaten ? 1 : 0.85,
+              filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.12))",
               animation: isBeingEaten
-                ? "eating-shake 0.15s infinite"
-                : `float-slow ${food.speed}s ease-in-out infinite alternate`,
+                ? "food-eating-shake 0.15s infinite"
+                : `food-float ${food.speed}s ease-in-out infinite alternate`,
             }}
             title={`Hold 1.5s to eat ${food.name}!`}
           >
-            <span>{food.emoji}</span>
+            <span className="block leading-none">{food.emoji}</span>
 
-            {/* Circular bite progress ring */}
+            {/* Eating progress circle indicator */}
             {isBeingEaten && (
-              <div className="absolute -inset-2 flex items-center justify-center pointer-events-none">
+              <div className="pointer-events-none absolute -inset-3 flex items-center justify-center">
                 <svg className="size-full -rotate-90" viewBox="0 0 36 36">
                   <path
-                    className="text-primary/40"
-                    strokeWidth="3"
+                    className="text-primary/30"
+                    strokeWidth="3.5"
                     stroke="currentColor"
                     fill="none"
                     d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
@@ -230,7 +229,7 @@ export function InteractiveFoodBackground() {
                   <path
                     className="text-primary"
                     strokeDasharray={`${progress}, 100`}
-                    strokeWidth="3.5"
+                    strokeWidth="4.5"
                     strokeLinecap="round"
                     stroke="currentColor"
                     fill="none"
@@ -244,16 +243,16 @@ export function InteractiveFoodBackground() {
       })}
 
       <style>{`
-        @keyframes float-slow {
+        @keyframes food-float {
           0% { transform: translateY(0px) rotate(0deg); }
-          100% { transform: translateY(-16px) rotate(6deg); }
+          100% { transform: translateY(-20px) rotate(10deg); }
         }
-        @keyframes eating-shake {
-          0% { transform: translate(1px, 1px) rotate(0deg); }
-          25% { transform: translate(-2px, -1px) rotate(-4deg); }
-          50% { transform: translate(2px, 0px) rotate(3deg); }
-          75% { transform: translate(-1px, 2px) rotate(-2deg); }
-          100% { transform: translate(1px, -1px) rotate(1deg); }
+        @keyframes food-eating-shake {
+          0% { transform: translate(1px, 1px) rotate(0deg) scale(0.9); }
+          25% { transform: translate(-3px, -1px) rotate(-6deg) scale(0.85); }
+          50% { transform: translate(3px, 1px) rotate(5deg) scale(0.8); }
+          75% { transform: translate(-2px, 2px) rotate(-4deg) scale(0.75); }
+          100% { transform: translate(1px, -1px) rotate(2deg) scale(0.7); }
         }
       `}</style>
     </div>
