@@ -174,9 +174,9 @@ function HomePage() {
           </p>
         </section>
 
-        {/* Liquid Glass Food Scanner Card */}
+        {/* Liquid Glass Food Scanner Card (Fixed: without movement jitter on click) */}
         <section aria-label="Food Scanner" className="w-full">
-          <div className="liquid-glass liquid-card-interactive rounded-3xl p-2 sm:p-4">
+          <div className="liquid-glass rounded-3xl p-2 sm:p-4">
             <FoodScanner />
           </div>
         </section>
