@@ -556,13 +556,13 @@ export function FoodScanner() {
                 if (barcode.trim()) void run({ barcode: barcode.trim() });
               }}
             >
-              <Input
-                value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-                inputMode="numeric"
-                placeholder="e.g. 8901058000108"
-                className="h-12 rounded-xl"
-              />
+          <Input
+  value={barcode}
+  onChange={(e) => setBarcode(e.target.value)}
+  inputMode="numeric"
+  placeholder="e.g. 8901058000108"
+  className="h-12 rounded-xl bg-white/90 text-neutral-950 placeholder:text-neutral-500 font-medium border-neutral-300 shadow-inner"
+/> 
               <Button type="submit" className="h-12" disabled={loading || !barcode.trim()}>
                 Check barcode
               </Button>
@@ -578,11 +578,11 @@ export function FoodScanner() {
               }}
             >
               <Input
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="e.g. Maggi 2-minute noodles, Coke, paneer tikka"
-                className="h-12 rounded-xl"
-              />
+  value={text}
+  onChange={(e) => setText(e.target.value)}
+  placeholder="e.g. Maggi 2-minute noodles, Coke, paneer tikka"
+  className="h-12 rounded-xl bg-white/90 text-neutral-950 placeholder:text-neutral-500 font-medium border-neutral-300 shadow-inner"
+/>
               <Button type="submit" className="h-12" disabled={loading || !text.trim()}>
                 Grade it
               </Button>
