@@ -111,7 +111,21 @@ function HomePage() {
           transform: translateY(20%) rotate(15deg);
         }
 
-        /* 3D Bulge + Smooth Suspension Lift */
+        /* Stable Glass Hover for Scanner: keeps hover glow/depth without layout-shifting child buttons */
+        .liquid-glass-stable-hover {
+          transition: border-color 0.35s ease, box-shadow 0.35s ease;
+          will-change: box-shadow, border-color;
+        }
+
+        .liquid-glass-stable-hover:hover {
+          border-color: rgba(255, 255, 255, 0.45);
+          box-shadow: 
+            0 30px 60px -15px rgba(0, 0, 0, 0.7),
+            0 0 30px 4px rgba(16, 185, 129, 0.2),
+            inset 0 1px 2px 0 rgba(255, 255, 255, 0.6);
+        }
+
+        /* 3D Bulge + Smooth Suspension Lift (For standalone content cards) */
         .liquid-card-interactive {
           transition: 
             transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
@@ -134,7 +148,7 @@ function HomePage() {
           box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
         }
 
-        /* Glass Orb Glows behind elements */
+        /* Atmospheric glass orbs */
         .glass-orb {
           position: absolute;
           border-radius: 50%;
@@ -174,14 +188,14 @@ function HomePage() {
           </p>
         </section>
 
-        {/* Liquid Glass Food Scanner Card (Fixed: without movement jitter on click) */}
+        {/* Liquid Glass Food Scanner Card (With Hover Light Reflection & Glow, No Click-Breaking Shift) */}
         <section aria-label="Food Scanner" className="w-full">
-          <div className="liquid-glass rounded-3xl p-2 sm:p-4">
+          <div className="liquid-glass liquid-glass-stable-hover rounded-3xl p-2 sm:p-4">
             <FoodScanner />
           </div>
         </section>
 
-        {/* How It Works (Liquid Glass Cards) */}
+        {/* How It Works (Liquid Glass 3D Lift Cards) */}
         <section className="mt-20 sm:mt-28">
           <div className="mb-10 text-center">
             <h2 className="font-serif text-2xl font-bold tracking-tight text-white sm:text-3xl">How NutriGrade Works</h2>
