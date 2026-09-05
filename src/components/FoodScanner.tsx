@@ -340,24 +340,34 @@ export function FoodScanner() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border bg-card p-4 shadow-soft sm:p-6">
+      <div className="rounded-3xl border border-neutral-200/80 bg-white/90 p-4 shadow-soft sm:p-6 backdrop-blur-md">
+        {/* Unblocked Interactive Mode Selector */}
         <div className="flex flex-wrap gap-2">
-          {modes.map((m) => (
-            <Button
-              key={m.id}
-              type="button"
-              variant={mode === m.id ? "default" : "secondary"}
-              onClick={() => {
-                stopAllCameras();
-                setMode(m.id);
-                setPreview(null);
-              }}
-              className={cn("rounded-full border", mode === m.id && "border-primary")}
-            >
-              <m.icon className="size-4" />
-              {m.label}
-            </Button>
-          ))}
+          {modes.map((m) => {
+            const isActive = mode === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  stopAllCameras();
+                  setPreview(null);
+                  setMode(m.id);
+                }}
+                className={cn(
+                  "inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full border transition-all duration-150 cursor-pointer select-none",
+                  isActive
+                    ? "bg-emerald-600 text-white border-emerald-500 shadow-md scale-100"
+                    : "bg-neutral-100/90 hover:bg-neutral-200 text-neutral-800 border-neutral-300"
+                )}
+              >
+                <m.icon className={cn("size-4", isActive ? "text-white" : "text-neutral-600")} />
+                <span>{m.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="mt-5">
@@ -424,7 +434,7 @@ export function FoodScanner() {
                   </div>
                 </div>
               ) : preview ? (
-                <div className="space-y-4 rounded-2xl border bg-secondary/30 p-4 text-center">
+                <div className="space-y-4 rounded-2xl border border-neutral-200 bg-neutral-50/60 p-4 text-center">
                   <img
                     src={preview}
                     alt="Captured label"
@@ -446,7 +456,7 @@ export function FoodScanner() {
                     <Button
                       type="button"
                       onClick={() => void run({ imageBase64: preview, name: text.trim() || undefined })}
-                      className="rounded-xl px-6"
+                      className="rounded-xl px-6 bg-emerald-600 hover:bg-emerald-700 text-white"
                       disabled={loading}
                     >
                       <Check className="mr-2 size-4" /> Grade this Label
@@ -454,11 +464,11 @@ export function FoodScanner() {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-secondary/50 p-8 text-center">
-                  <ImageUp className="size-8 text-primary" />
+                <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50/80 p-8 text-center">
+                  <ImageUp className="size-8 text-emerald-600" />
                   <div>
-                    <p className="font-medium text-foreground">Upload or capture food label</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
+                    <p className="font-semibold text-neutral-900">Upload or capture food label</p>
+                    <p className="mt-0.5 text-xs text-neutral-500">
                       Ingredients and nutrition panel work best
                     </p>
                   </div>
@@ -478,7 +488,7 @@ export function FoodScanner() {
                     <Button
                       type="button"
                       onClick={() => void startPhotoCamera()}
-                      className="inline-flex items-center gap-2 rounded-xl"
+                      className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white"
                     >
                       <Camera className="size-4" />
                       Take Photo
@@ -488,7 +498,7 @@ export function FoodScanner() {
                       type="button"
                       variant="outline"
                       onClick={() => galleryInputRef.current?.click()}
-                      className="inline-flex items-center gap-2 rounded-xl"
+                      className="inline-flex items-center gap-2 rounded-xl border-neutral-300 text-neutral-800"
                     >
                       <ImageIcon className="size-4" />
                       Choose from Gallery
@@ -522,10 +532,10 @@ export function FoodScanner() {
                     </Button>
                   </div>
 
-                  <div className="pointer-events-none absolute inset-x-10 top-1/2 h-24 -translate-y-1/2 rounded-xl border-2 border-accent" />
+                  <div className="pointer-events-none absolute inset-x-10 top-1/2 h-24 -translate-y-1/2 rounded-xl border-2 border-emerald-400" />
                   <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
                     <span className="inline-flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
-                      <ScanLine className="size-4 text-primary" /> Hold steady and fill the frame
+                      <ScanLine className="size-4 text-emerald-600" /> Hold steady and fill the frame
                     </span>
                   </div>
                   <div className="absolute inset-x-0 bottom-0 flex justify-center gap-2 p-3">
@@ -535,13 +545,13 @@ export function FoodScanner() {
                   </div>
                 </div>
               ) : (
-                <div className="rounded-2xl border-2 border-dashed bg-secondary/50 p-10 text-center">
-                  <p className="font-medium">Point your camera at the barcode</p>
-                  <p className="mb-4 text-sm text-muted-foreground">
+                <div className="rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50/80 p-10 text-center">
+                  <p className="font-semibold text-neutral-900">Point your camera at the barcode</p>
+                  <p className="mb-4 text-sm text-neutral-500">
                     We detect the code automatically and pull the product details.
                   </p>
-                  <Button type="button" onClick={() => void startBarcodeCamera()}>
-                    <Camera className="size-4" /> Open camera
+                  <Button type="button" onClick={() => void startBarcodeCamera()} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                    <Camera className="size-4 mr-2" /> Open camera
                   </Button>
                 </div>
               )}
@@ -556,14 +566,14 @@ export function FoodScanner() {
                 if (barcode.trim()) void run({ barcode: barcode.trim() });
               }}
             >
-          <Input
-  value={barcode}
-  onChange={(e) => setBarcode(e.target.value)}
-  inputMode="numeric"
-  placeholder="e.g. 8901058000108"
-  className="h-12 rounded-xl bg-white/90 text-neutral-950 placeholder:text-neutral-500 font-medium border-neutral-300 shadow-inner"
-/> 
-              <Button type="submit" className="h-12" disabled={loading || !barcode.trim()}>
+              <Input
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+                inputMode="numeric"
+                placeholder="e.g. 8901058000108"
+                className="h-12 rounded-xl bg-white text-neutral-950 placeholder:text-neutral-500 font-medium border-neutral-300 shadow-inner"
+              />
+              <Button type="submit" className="h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-medium" disabled={loading || !barcode.trim()}>
                 Check barcode
               </Button>
             </form>
@@ -578,12 +588,12 @@ export function FoodScanner() {
               }}
             >
               <Input
-  value={text}
-  onChange={(e) => setText(e.target.value)}
-  placeholder="e.g. Maggi 2-minute noodles, Coke, paneer tikka"
-  className="h-12 rounded-xl bg-white/90 text-neutral-950 placeholder:text-neutral-500 font-medium border-neutral-300 shadow-inner"
-/>
-              <Button type="submit" className="h-12" disabled={loading || !text.trim()}>
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="e.g. Maggi 2-minute noodles, Coke, paneer tikka"
+                className="h-12 rounded-xl bg-white text-neutral-950 placeholder:text-neutral-500 font-medium border-neutral-300 shadow-inner"
+              />
+              <Button type="submit" className="h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-medium" disabled={loading || !text.trim()}>
                 Grade it
               </Button>
             </form>
@@ -592,15 +602,15 @@ export function FoodScanner() {
       </div>
 
       {loading && (
-        <div className="flex items-center justify-center gap-3 rounded-3xl border bg-card p-10 shadow-soft">
-          <Loader2 className="size-5 animate-spin text-primary" />
-          <span className="font-medium">Reading the label and grading…</span>
+        <div className="flex items-center justify-center gap-3 rounded-3xl border border-neutral-200 bg-white/95 p-10 shadow-soft">
+          <Loader2 className="size-5 animate-spin text-emerald-600" />
+          <span className="font-semibold text-neutral-800">Reading the label and grading…</span>
         </div>
       )}
 
       {result && !loading && <ResultCard result={result} />}
       {!user && result && !loading && (
-        <p className="text-center text-sm text-muted-foreground">
+        <p className="text-center text-sm font-medium text-neutral-400">
           Sign in to keep this scan in your history.
         </p>
       )}
